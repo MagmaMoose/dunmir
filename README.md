@@ -1,5 +1,218 @@
 # MikroTik Minder
 
+> **Implementation status (May 2026)** — Both pieces are scaffolded:
+> - **Control plane** in [`worker/`](worker/) — Cloudflare Worker + D1, heartbeat / job ingest, dead-man cron, Slack/Discord/generic webhook delivery, and a read-only dashboard.
+> - **Agent** in [`agent/`](agent/) — Python daemon that probes RouterOS over the API and/or SSH, reports heartbeats and `health_check` jobs to the control plane, and exits non-zero on failure for cron use.
+>
+> Wire contract between them: [`docs/agent-protocol.md`](docs/agent-protocol.md).
+
+## Architecture at a glance
+
+```
+┌─────────────────────────────┐                  ┌──────────────────────────────┐
+│   Trusted host (operator)   │                  │  Cloudflare Worker + D1       │
+│  ┌───────────────────────┐  │  HTTPS heartbeat │  ┌────────────────────────┐  │
+│  │  agent (CLI / daemon) │──┼─────────────────▶│  │ /v1/ingest/heartbeat   │  │
+│  │  SSH / RouterOS API   │  │  HTTPS job report│  │ /v1/ingest/jobs        │  │
+│  │  Git for exports      │  │                  │  └────────────────────────┘  │
+│  └───────────┬───────────┘  │                  │  ┌────────────────────────┐  │
+│              │              │                  │  │ cron sweep · alert fan │──┼─▶ Slack / Discord / webhook
+│  outbound to routers only   │                  │  └────────────────────────┘  │
+└──────────────┼──────────────┘                  │  ┌────────────────────────┐  │
+               ▼                                 │  │ read-only dashboard /  │  │
+        MikroTik routers                         │  └────────────────────────┘  │
+                                                 └──────────────────────────────┘
+```
+
+The agent does the privileged work — it lives on the operator's network and talks to routers. The Worker is the assurance layer: it stores what the agent reports, fires alerts when expected reports go missing (the dead-man feature), and surfaces the fleet's state in one place.
+
+## Quickstart
+
+**Control plane (Cloudflare Worker):**
+
+```bash
+cd worker
+npm install
+npx wrangler login                                 # one-time
+npx wrangler d1 create minder                      # paste database_id into wrangler.toml
+npx wrangler d1 migrations apply minder --remote
+npx wrangler secret put ADMIN_TOKEN                # paste a long random string
+npx wrangler deploy
+```
+
+Sign in to the dashboard with the admin token, then `POST /v1/admin/agents` to mint a bearer token for the agent (it's returned exactly once).
+
+**Agent (on a trusted host inside your network):**
+
+```bash
+cd agent
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+cp examples/config.example.yaml ~/minder.yaml      # then edit URLs and devices
+
+export MTM_AGENT_TOKEN=mtm_...
+export CORE_RTR_01_PASSWORD=...
+mikrotik-minder-agent run --config ~/minder.yaml -v
+```
+
+For development without routers: `mikrotik-minder-agent run --config ... --once --dry-run` posts synthetic heartbeats so you can verify the worker is wired up before touching any RouterOS device.
+
+## Onboarding (Kubernetes + Helm)
+
+The recommended production deployment is the agent in a Kubernetes cluster that has L3 access to your MikroTik fleet — this is the shape most homelabs and MSPs already have. The control plane is the public Worker on Cloudflare; the agent is the [Helm chart in `charts/mikrotik-minder-agent/`](charts/mikrotik-minder-agent/).
+
+### Prerequisites
+
+- A Cloudflare account with Workers + D1 (free tier is enough for a small fleet).
+- A Kubernetes cluster on a network that can reach your routers' management interfaces (SSH/22 and RouterOS API/8728 or 8729-TLS).
+- A private git repo for the export history (GitHub, GitLab, Gitea — anywhere you can add a deploy key).
+- `wrangler`, `helm`, and `kubectl` locally.
+
+### 1. Deploy the control plane
+
+```bash
+git clone https://github.com/magmamoose/mikrotik-minder.git
+cd mikrotik-minder/worker
+npm install
+npx wrangler login
+npx wrangler d1 create minder                      # copy database_id into wrangler.toml
+npx wrangler d1 migrations apply minder --remote
+npx wrangler secret put ADMIN_TOKEN                # long random string
+npx wrangler deploy
+```
+
+Note the Worker URL — you'll need it for the agent. Open it in a browser and sign in with `ADMIN_TOKEN`; you should see the (empty) dashboard.
+
+### 2. Mint an agent token + alert routes
+
+```bash
+ADMIN=<your-admin-token>
+WORKER=https://mikrotik-minder.<your-subdomain>.workers.dev
+
+# Mint an agent token (printed ONCE)
+curl -sS -X POST "$WORKER/v1/admin/agents" \
+  -H "authorization: bearer $ADMIN" -H "content-type: application/json" \
+  -d '{"name":"prod-agent"}'
+
+# (optional) Add a Slack webhook so alerts land in #netops
+curl -sS -X POST "$WORKER/v1/admin/alert-routes" \
+  -H "authorization: bearer $ADMIN" -H "content-type: application/json" \
+  -d '{"name":"netops-slack","kind":"slack","url":"https://hooks.slack.com/...","min_severity":"warning"}'
+```
+
+### 3. Generate a git deploy key for the agent's export history
+
+```bash
+ssh-keygen -t ed25519 -N "" -C "mikrotik-minder@prod" -f ./minder_deploy
+# Add minder_deploy.pub to your private repo as a deploy key WITH WRITE access:
+#   GitHub: Settings → Deploy keys → ✓ Allow write access
+#   Gitea/GitLab: equivalent UI in Settings → Deploy Keys
+```
+
+### 4. Create a values file
+
+`values-prod.yaml`:
+
+```yaml
+config:
+  server:
+    url: https://mikrotik-minder.<your-subdomain>.workers.dev
+    agent_token_env: MTM_AGENT_TOKEN
+  defaults:
+    heartbeat_interval_seconds: 300
+    export_interval_seconds: 3600
+    update_check_interval_seconds: 21600
+    backup_interval_seconds: 86400
+  git:
+    repo: /var/lib/mikrotik-minder/configs
+    remote:
+      url: git@github.com:acme/network-configs.git
+      branch: main
+      ssh_key_path: /var/lib/mikrotik-minder/.ssh/git_deploy
+  backup:
+    dir: /var/lib/mikrotik-minder/backups
+    password_env: MTM_BACKUP_PASSWORD
+    retention: 14
+  devices:
+    - name: core-rtr-01
+      address: 10.0.0.1
+      username: minder
+      password_env: CORE_RTR_01_PASSWORD
+      site: dc1
+      role: core
+    - name: branch-rtr-07
+      address: 10.7.0.1
+      username: minder
+      password_env: BRANCH_RTR_07_PASSWORD
+      site: branch-7
+
+secrets:
+  create: true                  # use external-secrets / sealed-secrets in real prod
+  data:
+    MTM_AGENT_TOKEN: mtm_...    # from step 2
+    MTM_BACKUP_PASSWORD: "<long random; this encrypts the .backup files>"
+    CORE_RTR_01_PASSWORD: "..."
+    BRANCH_RTR_07_PASSWORD: "..."
+
+git:
+  sshKey: |
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    <paste contents of ./minder_deploy from step 3>
+    -----END OPENSSH PRIVATE KEY-----
+  # Optional: pre-pin remote host keys so first push doesn't have to accept-new
+  knownHosts: |
+    github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+
+persistence:
+  size: 10Gi
+  # storageClassName: fast-ssd
+
+resources:
+  requests: { cpu: 50m,  memory: 128Mi }
+  limits:   { cpu: 500m, memory: 512Mi }
+```
+
+For real production, replace `secrets.data` with an externally-managed Secret — set `secrets.create: false` and `secrets.existingSecretName: minder-env`, then have external-secrets / sealed-secrets / vault-csi reconcile it.
+
+### 5. Install
+
+```bash
+helm install minder ./charts/mikrotik-minder-agent \
+    --namespace minder --create-namespace \
+    -f values-prod.yaml
+
+kubectl -n minder rollout status deploy/minder-mikrotik-minder-agent
+kubectl -n minder logs -f deploy/minder-mikrotik-minder-agent
+```
+
+### 6. Verify
+
+Three checks, each catches a different class of misconfiguration:
+
+```bash
+# (a) Worker URL + agent token (does NOT touch routers)
+kubectl -n minder exec deploy/minder-mikrotik-minder-agent -- \
+    mikrotik-minder-agent test-connection -c /etc/mikrotik-minder/config.yaml
+
+# (b) One device, locally, no worker call
+kubectl -n minder exec deploy/minder-mikrotik-minder-agent -- \
+    mikrotik-minder-agent check -c /etc/mikrotik-minder/config.yaml core-rtr-01
+
+# (c) Manual export+commit+push, no worker call
+kubectl -n minder exec deploy/minder-mikrotik-minder-agent -- \
+    mikrotik-minder-agent export-once -c /etc/mikrotik-minder/config.yaml core-rtr-01 -v
+```
+
+After a minute or two, the Worker dashboard should show every device with `last_status: ok` and one row per device under "Recent jobs". Configure your alert sinks (`/v1/admin/alert-routes`) and you're done.
+
+### Onboarding a new device later
+
+1. Add the device under `config.devices` in your values file.
+2. Add its password to `secrets.data` (or your external secret store).
+3. `helm upgrade minder ./charts/mikrotik-minder-agent -n minder -f values-prod.yaml` — the pod restarts with the new config and the new device starts heartbeating on the next tick.
+
+The Worker auto-registers devices on first heartbeat, so step 1 is the only required action on the operator side. No worker-side action needed per device.
+
 ## Positioning
 
 MikroTik Minder is a boring, reliable maintenance orchestrator for MikroTik RouterOS and RouterBOARD fleets. It does not try to replace RouterOS, The Dude, Prometheus, or your existing automation stack; it makes sure the important maintenance jobs happened, were recorded, were reviewed, and can be trusted.

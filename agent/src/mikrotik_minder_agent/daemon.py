@@ -1,0 +1,503 @@
+"""Per-device tick loop.
+
+Each device gets one background thread that probes on its own interval. Failures
+flip the device to ``status=down`` until a probe succeeds again; the worker mirrors
+that with its own dead-man alert if the agent itself stops checking in.
+"""
+
+from __future__ import annotations
+
+import logging
+import signal
+import threading
+import time
+from dataclasses import dataclass, field
+
+from .backup import BackupError, BackupResult, BackupRunner, backup_summary
+from .config import (
+    AgentConfig,
+    DeviceConfig,
+    backup_interval,
+    export_interval,
+    heartbeat_interval,
+    update_check_interval,
+)
+from .export import ExportError, ExportResult, ExportRunner
+from .minder import JobReport, MinderClient, MinderError
+from .transports import ProbeResult, TransportError, build_transports
+from .updates import (
+    UpdateCheckError,
+    UpdateCheckResult,
+    run_update_check,
+    update_summary,
+)
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class DeviceState:
+    last_status: str = "unknown"
+    last_probe: float = 0.0
+    last_export: float = 0.0
+    last_update_check: float = 0.0
+    last_backup: float = 0.0
+    consecutive_failures: int = 0
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+class Daemon:
+    """Runs one thread per device. Call ``run()`` to block, or ``run_once()`` for cron-style."""
+
+    def __init__(self, config: AgentConfig, *, dry_run: bool = False) -> None:
+        self._config = config
+        self._dry_run = dry_run
+        self._stop = threading.Event()
+        self._state: dict[str, DeviceState] = {d.name: DeviceState() for d in config.devices}
+        self._exporter: ExportRunner | None = None
+        if config.git is not None:
+            try:
+                self._exporter = ExportRunner(config)
+            except ExportError as exc:
+                log.error("export pipeline disabled: %s", exc)
+        self._backup_runner: BackupRunner | None = None
+        if config.backup is not None:
+            try:
+                self._backup_runner = BackupRunner(config)
+            except BackupError as exc:
+                log.error("backup pipeline disabled: %s", exc)
+
+    # --- Public entry points ---
+
+    def run(self) -> None:
+        self._install_signal_handlers()
+        with MinderClient(self._config.server) as minder:
+            threads = [
+                threading.Thread(
+                    target=self._device_loop,
+                    args=(d, minder),
+                    name=f"dev:{d.name}",
+                    daemon=True,
+                )
+                for d in self._config.devices
+            ]
+            for t in threads:
+                t.start()
+            log.info("agent running with %d device(s); ctrl-c to stop", len(threads))
+            try:
+                while not self._stop.is_set():
+                    self._stop.wait(timeout=1.0)
+            finally:
+                self._stop.set()
+                log.info("shutting down")
+                for t in threads:
+                    t.join(timeout=5.0)
+
+    def run_once(self) -> int:
+        """One pass over all devices, sequentially. Returns the count of failed probes."""
+        failures = 0
+        with MinderClient(self._config.server) as minder:
+            for d in self._config.devices:
+                if not self._tick(d, minder):
+                    failures += 1
+        return failures
+
+    # --- Per-device loop ---
+
+    def _device_loop(self, device: DeviceConfig, minder: MinderClient) -> None:
+        interval = heartbeat_interval(device, self._config.defaults)
+        log.info("device %s: every %ds", device.name, interval)
+        while not self._stop.is_set():
+            self._tick(device, minder)
+            if self._stop.wait(timeout=interval):
+                break
+
+    def _tick(self, device: DeviceConfig, minder: MinderClient) -> bool:
+        started = int(time.time())
+        result: ProbeResult | None = None
+        error: str | None = None
+        transport_kind = "none"
+
+        if self._dry_run:
+            transport_kind = "dry"
+            result = ProbeResult(kind="dry", identity=device.name, version="dry-run", latency_ms=0)
+        else:
+            try:
+                transports = build_transports(device, self._config.defaults)
+            except TransportError as exc:
+                error = str(exc)
+                transports = []
+            for t in transports:
+                transport_kind = t.kind  # remember the last one we tried
+                try:
+                    result = t.probe()
+                    error = None
+                    break
+                except TransportError as exc:
+                    error = str(exc)
+                    log.warning("device %s %s probe failed: %s", device.name, t.kind, exc)
+
+        finished = int(time.time())
+        ok = result is not None
+        status_label = "ok" if ok else "down"
+        probe_ok = self._report(
+            device,
+            minder,
+            ok=ok,
+            status_label=status_label,
+            transport_kind=transport_kind,
+            result=result,
+            error=error,
+            started=started,
+            finished=finished,
+        )
+
+        # Only attempt heavier jobs when the device responded — no point hammering a down router.
+        if ok and not self._dry_run:
+            if self._export_due(device, finished):
+                self._run_export(device, minder)
+            if self._update_check_due(device, finished):
+                self._run_update_check(device, minder)
+            if self._backup_due(device, finished):
+                self._run_backup(device, minder)
+
+        return probe_ok
+
+    def _report(
+        self,
+        device: DeviceConfig,
+        minder: MinderClient,
+        *,
+        ok: bool,
+        status_label: str,
+        transport_kind: str,
+        result: ProbeResult | None,
+        error: str | None,
+        started: int,
+        finished: int,
+    ) -> bool:
+        state = self._state[device.name]
+        with state.lock:
+            previous = state.last_status
+            state.last_probe = finished
+            state.last_status = status_label
+            state.consecutive_failures = 0 if ok else state.consecutive_failures + 1
+            failures = state.consecutive_failures
+
+        try:
+            minder.send_heartbeat(device.name, status=status_label)
+        except MinderError as exc:
+            log.error("device %s heartbeat send failed: %s", device.name, exc)
+            return False
+
+        summary = self._summary(ok, transport_kind, result, error)
+        details: dict[str, object] = {
+            "transport": transport_kind,
+            "consecutive_failures": failures,
+        }
+        if result:
+            details["identity"] = result.identity
+            details["version"] = result.version
+            details["latency_ms"] = result.latency_ms
+        if error:
+            details["error"] = error[:300]
+
+        try:
+            minder.send_job(
+                JobReport(
+                    device=device.name,
+                    kind="health_check",
+                    status="success" if ok else "failed",
+                    started_at=started,
+                    finished_at=finished,
+                    summary=summary,
+                    details=details,
+                ),
+            )
+        except MinderError as exc:
+            log.error("device %s job send failed: %s", device.name, exc)
+            return False
+
+        if previous != status_label:
+            log.info("device %s status %s -> %s", device.name, previous, status_label)
+        return ok
+
+    # --- Export ---
+
+    def _export_due(self, device: DeviceConfig, now: float) -> bool:
+        if self._exporter is None:
+            return False
+        interval = export_interval(device, self._config.defaults)
+        if not interval:
+            return False
+        state = self._state[device.name]
+        with state.lock:
+            last = state.last_export
+        return last == 0.0 or now - last >= interval
+
+    def _run_export(self, device: DeviceConfig, minder: MinderClient) -> None:
+        assert self._exporter is not None
+        started = int(time.time())
+        try:
+            result: ExportResult = self._exporter.run(device)
+        except ExportError as exc:
+            log.warning("device %s export failed: %s", device.name, exc)
+            self._report_export_failure(device, minder, started, str(exc))
+            return
+
+        state = self._state[device.name]
+        with state.lock:
+            state.last_export = float(result.finished_at)
+
+        # A push failure means the offsite mirror is behind; treat that as a job failure
+        # regardless of whether there was config drift. The local commit still landed
+        # so operators can investigate from disk; the worker fires job_failed.
+        push_failed = result.push_error is not None
+        if push_failed:
+            kind = "drift" if result.changed else "export"
+            status = "failed"
+        elif result.changed:
+            kind, status = "drift", "warning"
+        else:
+            kind, status = "export", "success"
+        summary = self._export_summary(result)
+        details: dict[str, object] = {
+            "bytes_captured": result.bytes_captured,
+            "changed": result.changed,
+            "commit_sha": result.commit_sha,
+            "lines_added": result.lines_added,
+            "lines_removed": result.lines_removed,
+            "relative_path": result.relative_path,
+            "pushed": result.pushed,
+            "push_skipped": result.push_skipped,
+            "push_error": result.push_error,
+        }
+        try:
+            minder.send_job(
+                JobReport(
+                    device=device.name,
+                    kind=kind,
+                    status=status,
+                    started_at=result.started_at,
+                    finished_at=result.finished_at,
+                    summary=summary,
+                    details=details,
+                ),
+            )
+        except MinderError as exc:
+            log.error("device %s export send failed: %s", device.name, exc)
+
+    def _report_export_failure(
+        self,
+        device: DeviceConfig,
+        minder: MinderClient,
+        started: int,
+        error: str,
+    ) -> None:
+        finished = int(time.time())
+        try:
+            minder.send_job(
+                JobReport(
+                    device=device.name,
+                    kind="export",
+                    status="failed",
+                    started_at=started,
+                    finished_at=finished,
+                    summary=f"export failed: {error[:200]}",
+                    details={"error": error[:500]},
+                ),
+            )
+        except MinderError as exc:
+            log.error("device %s export failure send failed: %s", device.name, exc)
+
+    # --- Update check ---
+
+    def _update_check_due(self, device: DeviceConfig, now: float) -> bool:
+        interval = update_check_interval(device, self._config.defaults)
+        if not interval:
+            return False
+        state = self._state[device.name]
+        with state.lock:
+            last = state.last_update_check
+        return last == 0.0 or now - last >= interval
+
+    def _run_update_check(self, device: DeviceConfig, minder: MinderClient) -> None:
+        started = int(time.time())
+        try:
+            result: UpdateCheckResult = run_update_check(device, self._config.defaults)
+        except UpdateCheckError as exc:
+            log.warning("device %s update_check failed: %s", device.name, exc)
+            self._send_failure_job(device, minder, "update_check", started, str(exc))
+            return
+
+        state = self._state[device.name]
+        with state.lock:
+            state.last_update_check = float(result.finished_at)
+
+        # update_check job: success when up-to-date, warning when an update is available.
+        upd = result.update
+        status = "warning" if upd.available else "success"
+        details: dict[str, object] = {
+            "channel": upd.channel,
+            "installed_version": upd.installed_version,
+            "latest_version": upd.latest_version,
+            "status": upd.status,
+            "available": upd.available,
+        }
+        try:
+            minder.send_job(
+                JobReport(
+                    device=device.name,
+                    kind="update_check",
+                    status=status,
+                    started_at=result.started_at,
+                    finished_at=result.finished_at,
+                    summary=update_summary(result),
+                    details=details,
+                ),
+            )
+        except MinderError as exc:
+            log.error("device %s update_check send failed: %s", device.name, exc)
+
+        # firmware_align job: only post when this device has routerboard firmware to report on.
+        fw = result.firmware
+        if not fw.has_routerboard:
+            return
+        fw_status = "warning" if fw.mismatch else "success"
+        fw_details: dict[str, object] = {
+            "model": fw.model,
+            "current_firmware": fw.current_firmware,
+            "upgrade_firmware": fw.upgrade_firmware,
+            "mismatch": fw.mismatch,
+        }
+        fw_summary = (
+            f"firmware mismatch {fw.current_firmware} → {fw.upgrade_firmware}"
+            if fw.mismatch
+            else f"firmware aligned at {fw.current_firmware}"
+        )
+        try:
+            minder.send_job(
+                JobReport(
+                    device=device.name,
+                    kind="firmware_align",
+                    status=fw_status,
+                    started_at=result.started_at,
+                    finished_at=result.finished_at,
+                    summary=fw_summary,
+                    details=fw_details,
+                ),
+            )
+        except MinderError as exc:
+            log.error("device %s firmware_align send failed: %s", device.name, exc)
+
+    def _send_failure_job(
+        self,
+        device: DeviceConfig,
+        minder: MinderClient,
+        kind: str,
+        started: int,
+        error: str,
+    ) -> None:
+        finished = int(time.time())
+        try:
+            minder.send_job(
+                JobReport(
+                    device=device.name,
+                    kind=kind,
+                    status="failed",
+                    started_at=started,
+                    finished_at=finished,
+                    summary=f"{kind} failed: {error[:200]}",
+                    details={"error": error[:500]},
+                ),
+            )
+        except MinderError as exc:
+            log.error("device %s %s failure send failed: %s", device.name, kind, exc)
+
+    # --- Backup ---
+
+    def _backup_due(self, device: DeviceConfig, now: float) -> bool:
+        if self._backup_runner is None:
+            return False
+        interval = backup_interval(device, self._config.defaults)
+        if not interval:
+            return False
+        state = self._state[device.name]
+        with state.lock:
+            last = state.last_backup
+        return last == 0.0 or now - last >= interval
+
+    def _run_backup(self, device: DeviceConfig, minder: MinderClient) -> None:
+        assert self._backup_runner is not None
+        started = int(time.time())
+        try:
+            result: BackupResult = self._backup_runner.run(device)
+        except BackupError as exc:
+            log.warning("device %s backup failed: %s", device.name, exc)
+            self._send_failure_job(device, minder, "backup", started, str(exc))
+            return
+
+        state = self._state[device.name]
+        with state.lock:
+            state.last_backup = float(result.finished_at)
+
+        details: dict[str, object] = {
+            "file_name": result.file_name,
+            "file_path": result.file_path,
+            "size_bytes": result.size_bytes,
+            "sha256": result.sha256,
+            "retained": result.retained,
+            "pruned": result.pruned,
+        }
+        try:
+            minder.send_job(
+                JobReport(
+                    device=device.name,
+                    kind="backup",
+                    status="success",
+                    started_at=result.started_at,
+                    finished_at=result.finished_at,
+                    summary=backup_summary(result),
+                    details=details,
+                ),
+            )
+        except MinderError as exc:
+            log.error("device %s backup send failed: %s", device.name, exc)
+
+    @staticmethod
+    def _export_summary(result: ExportResult) -> str:
+        if not result.changed:
+            base = f"export ok · no changes · {result.bytes_captured} bytes"
+        else:
+            sha = (result.commit_sha or "")[:7]
+            base = (
+                f"drift · +{result.lines_added}/-{result.lines_removed} lines · "
+                f"commit {sha} · {result.bytes_captured} bytes"
+            )
+        if result.push_error:
+            return f"{base} · push FAILED: {result.push_error[:120]}"
+        if result.pushed:
+            return f"{base} · pushed"
+        return base
+
+    @staticmethod
+    def _summary(ok: bool, kind: str, result: ProbeResult | None, error: str | None) -> str:
+        if ok and result:
+            ident = result.identity or "?"
+            ver = result.version or "?"
+            return f"{kind} ok · {ident} · ROS {ver} · {result.latency_ms}ms"
+        return f"{kind} failed: {(error or 'unknown error')[:200]}"
+
+    # --- Signals ---
+
+    def _install_signal_handlers(self) -> None:
+        def handler(signum, _frame):
+            log.info("received signal %d", signum)
+            self._stop.set()
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                signal.signal(sig, handler)
+            except ValueError:
+                # signal() only works on the main thread; harmless if we're not on it.
+                pass

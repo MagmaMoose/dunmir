@@ -1,0 +1,30 @@
+name = "mikrotik-minder"
+main = "src/index.ts"
+compatibility_date = "2025-01-09"
+compatibility_flags = ["nodejs_compat"]
+
+# Run the dead-man-alert sweep every minute.
+[triggers]
+crons = ["* * * * *"]
+
+# D1 binding. Create the database with `npm run db:create` and paste the id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "minder"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# Secrets (set via `wrangler secret put ADMIN_TOKEN`):
+#   ADMIN_TOKEN  - bearer token for /v1/admin/* endpoints. Long random string.
+#
+# Public-facing vars below are non-secret runtime tuning knobs.
+[vars]
+# Default heartbeat interval applied to a device when none is set explicitly.
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = "3600"
+# Grace period added on top of the interval before a device is considered down.
+DEFAULT_GRACE_SECONDS = "600"
+# How many jobs/alerts to keep in the dashboard tables.
+DASHBOARD_ROWS = "50"
+
+[observability]
+enabled = true

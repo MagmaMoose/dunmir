@@ -1,3 +1,10 @@
+# Node / TypeScript / Cloudflare Workers
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.tsbuildinfo
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -217,3 +224,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 .idea
+
+# macOS
+.DS_Store
