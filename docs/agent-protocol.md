@@ -1,17 +1,21 @@
 # Agent protocol
 
-The Mikrotik Minder control plane is a public HTTPS service. Agents run on a trusted host inside the operator's network, talk to routers over SSH / RouterOS API, and POST the *outcomes* (heartbeats and job reports) to this service. The service stores them, fires alerts when expected events are missing, and renders a read-only dashboard.
+The Mikrotik Minder control plane is a public HTTPS service. Agents run on a trusted host inside the operator's network, talk to routers over SSH / RouterOS API, and POST the *outcomes* (heartbeats and job reports) to this service. The service stores them and fires outbound webhook alerts when expected events are missing.
 
 The protocol is intentionally small: an agent only needs an HTTP client.
 
+The OSS worker exposes ingest + admin REST endpoints and a public health probe; the operator-facing UI (config browser, backup vault, etc.) is a separate, licensed product.
+
 ## Authentication
 
-All endpoints require `Authorization: Bearer <token>`.
+All non-public endpoints require `Authorization: Bearer <token>`.
 
-| Token         | Used for                                     |
-| ------------- | -------------------------------------------- |
-| `ADMIN_TOKEN` | Admin REST API and dashboard sign-in         |
+| Token         | Used for                                       |
+| ------------- | ---------------------------------------------- |
+| `ADMIN_TOKEN` | Admin REST API (mint/manage agent tokens etc.) |
 | Agent token   | `/v1/ingest/*` (issued by the admin per-agent) |
+
+`GET /` and `GET /v1/health` are unauthenticated and return small JSON identifying the service.
 
 Agent tokens are returned exactly once by `POST /v1/admin/agents`. Re-issue with `POST /v1/admin/agents/:id/rotate-token`. The server stores a SHA-256 hash, never the token itself.
 
@@ -49,7 +53,7 @@ Agents send one record per completed maintenance job.
 - `kind` — one of `backup`, `export`, `drift`, `update_check`, `update_apply`, `firmware_align`, `health_check`, `restore_validate`, `inventory_sync`.
 - `status` — `success` | `warning` | `failed` | `skipped`.
 - `started_at` / `finished_at` — unix seconds.
-- `summary` — short human-readable line (≤ 500 chars), shown on the dashboard.
+- `summary` — short human-readable line (≤ 500 chars); surfaces in outbound alerts and is the human-readable record stored alongside the job.
 - `details` — arbitrary JSON; stored verbatim.
 - `device` — optional for fleet-wide jobs (e.g. `update_check --all`).
 
@@ -178,12 +182,12 @@ All under `/v1/admin`, gated by `ADMIN_TOKEN`. Examples in [`./examples.http`](.
 | DELETE | `/v1/admin/alert-routes/:id`        | Remove a sink.                                             |
 | POST   | `/v1/admin/alerts/test`             | Fire an `info` / `manual` alert across all matching sinks. |
 
-Read-only views (admin-gated):
+Public (no auth):
 
-- `GET /v1/devices` — devices joined with agent metadata.
-- `GET /v1/jobs?limit=&status=&kind=&device_id=` — recent jobs.
-- `GET /v1/alerts?limit=` — recent alerts.
+- `GET /` — service identifier JSON.
 - `GET /v1/health` — liveness probe.
+
+Read-only fleet/job/alert browsing is intentionally NOT in the OSS worker — that's what the licensed Pages frontend is for. Self-hosters who want a quick read-only API can query D1 directly with `wrangler d1 execute`.
 
 ## Alert routes
 

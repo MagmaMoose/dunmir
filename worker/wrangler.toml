@@ -2,16 +2,22 @@ name = "mikrotik-minder"
 main = "src/index.ts"
 compatibility_date = "2025-01-09"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+# Personal account hosting the public OSS control plane.
+# Override via CLOUDFLARE_ACCOUNT_ID env var when self-hosting.
+account_id = "6e26afa31c37dee1dc82ad2f214f9b3c"
 
 # Run the dead-man-alert sweep every minute.
 [triggers]
 crons = ["* * * * *"]
 
 # D1 binding. Create the database with `npm run db:create` and paste the id below.
+# The canonical hosted deploy at https://mikrotik-minder.sargeant.workers.dev
+# uses this D1. Self-hosters: `wrangler d1 create minder` and replace this id.
 [[d1_databases]]
 binding = "DB"
 database_name = "minder"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "03bb68db-e2c1-4069-ad01-e32cce5efb32"
 migrations_dir = "migrations"
 
 # Secrets (set via `wrangler secret put ADMIN_TOKEN`):
@@ -23,8 +29,6 @@ migrations_dir = "migrations"
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = "3600"
 # Grace period added on top of the interval before a device is considered down.
 DEFAULT_GRACE_SECONDS = "600"
-# How many jobs/alerts to keep in the dashboard tables.
-DASHBOARD_ROWS = "50"
 
 [observability]
 enabled = true

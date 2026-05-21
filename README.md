@@ -1,106 +1,86 @@
 # MikroTik Minder
 
-> **Implementation status (May 2026)** — Both pieces are scaffolded:
-> - **Control plane** in [`worker/`](worker/) — Cloudflare Worker + D1, heartbeat / job ingest, dead-man cron, Slack/Discord/generic webhook delivery, and a read-only dashboard.
-> - **Agent** in [`agent/`](agent/) — Python daemon that probes RouterOS over the API and/or SSH, reports heartbeats and `health_check` jobs to the control plane, and exits non-zero on failure for cron use.
+> **Implementation status (May 2026)** — The hosted control plane is live and the agent is shipping via Helm.
+> - **Hosted control plane**: [`https://mikrotik-minder.sargeant.workers.dev`](https://mikrotik-minder.sargeant.workers.dev) — Cloudflare Worker + D1. Heartbeat / job ingest, dead-man cron, Slack / Discord / generic webhook delivery. No public UI; the visual operator UX is a separate licensed product.
+> - **Agent**: [Helm chart](charts/mikrotik-minder-agent/) backed by the Python daemon in [`agent/`](agent/). Probes RouterOS over API and/or SSH; reports heartbeats and job results to the control plane.
 >
-> Wire contract between them: [`docs/agent-protocol.md`](docs/agent-protocol.md).
+> Wire contract: [`docs/agent-protocol.md`](docs/agent-protocol.md). Source for the worker, in case you want to self-host: [`worker/`](worker/).
 
 ## Architecture at a glance
 
 ```
 ┌─────────────────────────────┐                  ┌──────────────────────────────┐
-│   Trusted host (operator)   │                  │  Cloudflare Worker + D1       │
+│   K8s cluster (operator)    │                  │  Hosted control plane         │
 │  ┌───────────────────────┐  │  HTTPS heartbeat │  ┌────────────────────────┐  │
-│  │  agent (CLI / daemon) │──┼─────────────────▶│  │ /v1/ingest/heartbeat   │  │
+│  │  agent (Helm)         │──┼─────────────────▶│  │ /v1/ingest/heartbeat   │  │
 │  │  SSH / RouterOS API   │  │  HTTPS job report│  │ /v1/ingest/jobs        │  │
 │  │  Git for exports      │  │                  │  └────────────────────────┘  │
 │  └───────────┬───────────┘  │                  │  ┌────────────────────────┐  │
 │              │              │                  │  │ cron sweep · alert fan │──┼─▶ Slack / Discord / webhook
 │  outbound to routers only   │                  │  └────────────────────────┘  │
-└──────────────┼──────────────┘                  │  ┌────────────────────────┐  │
-               ▼                                 │  │ read-only dashboard /  │  │
-        MikroTik routers                         │  └────────────────────────┘  │
-                                                 └──────────────────────────────┘
+└──────────────┼──────────────┘                  └──────────────────────────────┘
+               ▼
+        MikroTik routers
 ```
 
-The agent does the privileged work — it lives on the operator's network and talks to routers. The Worker is the assurance layer: it stores what the agent reports, fires alerts when expected reports go missing (the dead-man feature), and surfaces the fleet's state in one place.
+The agent does the privileged work — it lives on the operator's network and talks to routers. The hosted control plane is the assurance layer: it stores what the agent reports and fires alerts when expected reports go missing (the dead-man feature). The agent is open source (Apache-2.0); the visual operator UI on top of the control plane is a separate licensed product.
+
+## Hosted control plane
+
+The control plane is **hosted publicly at `https://mikrotik-minder.sargeant.workers.dev`** — you don't have to deploy it yourself. You only run the agent in your own network. The hosted instance is single-tenant during the OSS preview; to get an agent token, [open an issue](https://github.com/magmamoose/mikrotik-minder/issues) or contact `caleb@magmamoose.com`.
+
+If you'd rather self-host the worker (separate Cloudflare account, your own D1, your own admin token), the code under [`worker/`](worker/) is fully self-contained — see [`worker/wrangler.toml`](worker/wrangler.toml) and the [`worker-deploy.yml`](.github/workflows/worker-deploy.yml) workflow for the deploy shape. The agent doesn't care whether it points at our hosted endpoint or your own; the URL is a config field.
 
 ## Quickstart
 
-**Control plane (Cloudflare Worker):**
-
 ```bash
-cd worker
-npm install
-npx wrangler login                                 # one-time
-npx wrangler d1 create minder                      # paste database_id into wrangler.toml
-npx wrangler d1 migrations apply minder --remote
-npx wrangler secret put ADMIN_TOKEN                # paste a long random string
-npx wrangler deploy
+helm repo add calebsargeant https://charts.calebsargeant.com
+helm install minder calebsargeant/mikrotik-minder-agent \
+    --namespace minder --create-namespace \
+    -f my-values.yaml
 ```
 
-Sign in to the dashboard with the admin token, then `POST /v1/admin/agents` to mint a bearer token for the agent (it's returned exactly once).
+A minimal `my-values.yaml`:
 
-**Agent (on a trusted host inside your network):**
+```yaml
+config:
+  server:
+    url: https://mikrotik-minder.sargeant.workers.dev
+    agent_token_env: MTM_AGENT_TOKEN
+  defaults:
+    heartbeat_interval_seconds: 300
+  devices:
+    - name: core-rtr-01
+      address: 10.0.0.1
+      username: minder
+      password_env: CORE_RTR_01_PASSWORD
 
-```bash
-cd agent
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
-cp examples/config.example.yaml ~/minder.yaml      # then edit URLs and devices
-
-export MTM_AGENT_TOKEN=mtm_...
-export CORE_RTR_01_PASSWORD=...
-mikrotik-minder-agent run --config ~/minder.yaml -v
+secrets:
+  create: true        # use external-secrets/sealed-secrets in real prod
+  data:
+    MTM_AGENT_TOKEN: mtm_...
+    CORE_RTR_01_PASSWORD: ...
 ```
 
-For development without routers: `mikrotik-minder-agent run --config ... --once --dry-run` posts synthetic heartbeats so you can verify the worker is wired up before touching any RouterOS device.
+That's the full happy path. Everything below is detail.
 
 ## Onboarding (Kubernetes + Helm)
 
-The recommended production deployment is the agent in a Kubernetes cluster that has L3 access to your MikroTik fleet — this is the shape most homelabs and MSPs already have. The control plane is the public Worker on Cloudflare; the agent is the [Helm chart in `charts/mikrotik-minder-agent/`](charts/mikrotik-minder-agent/).
+The supported deployment is the agent in a Kubernetes cluster that has L3 access to your MikroTik fleet — homelabs, MSP NOC clusters, etc. The agent ([`agent/`](agent/)) probes routers, captures `/export`, pulls encrypted backups, and reports to the hosted control plane.
 
 ### Prerequisites
 
-- A Cloudflare account with Workers + D1 (free tier is enough for a small fleet).
 - A Kubernetes cluster on a network that can reach your routers' management interfaces (SSH/22 and RouterOS API/8728 or 8729-TLS).
 - A private git repo for the export history (GitHub, GitLab, Gitea — anywhere you can add a deploy key).
-- `wrangler`, `helm`, and `kubectl` locally.
+- `helm` and `kubectl` locally.
 
-### 1. Deploy the control plane
+### 1. Get an agent token
 
-```bash
-git clone https://github.com/magmamoose/mikrotik-minder.git
-cd mikrotik-minder/worker
-npm install
-npx wrangler login
-npx wrangler d1 create minder                      # copy database_id into wrangler.toml
-npx wrangler d1 migrations apply minder --remote
-npx wrangler secret put ADMIN_TOKEN                # long random string
-npx wrangler deploy
-```
+The hosted control plane is at `https://mikrotik-minder.sargeant.workers.dev`. During the OSS preview, agent tokens are minted manually — [open an issue](https://github.com/magmamoose/mikrotik-minder/issues/new) with your operator name and we'll send back a token + the Slack/Discord/webhook URL(s) you want alerts routed to.
 
-Note the Worker URL — you'll need it for the agent. Open it in a browser and sign in with `ADMIN_TOKEN`; you should see the (empty) dashboard.
+(Self-hosting? Set `secrets.GITHUB_ACTIONS=…` for the deploy workflow, deploy your own worker, then `POST /v1/admin/agents` with your local `ADMIN_TOKEN` to mint a token. The rest of these steps are identical.)
 
-### 2. Mint an agent token + alert routes
-
-```bash
-ADMIN=<your-admin-token>
-WORKER=https://mikrotik-minder.<your-subdomain>.workers.dev
-
-# Mint an agent token (printed ONCE)
-curl -sS -X POST "$WORKER/v1/admin/agents" \
-  -H "authorization: bearer $ADMIN" -H "content-type: application/json" \
-  -d '{"name":"prod-agent"}'
-
-# (optional) Add a Slack webhook so alerts land in #netops
-curl -sS -X POST "$WORKER/v1/admin/alert-routes" \
-  -H "authorization: bearer $ADMIN" -H "content-type: application/json" \
-  -d '{"name":"netops-slack","kind":"slack","url":"https://hooks.slack.com/...","min_severity":"warning"}'
-```
-
-### 3. Generate a git deploy key for the agent's export history
+### 2. Generate a git deploy key for the agent's export history
 
 ```bash
 ssh-keygen -t ed25519 -N "" -C "mikrotik-minder@prod" -f ./minder_deploy
@@ -109,14 +89,14 @@ ssh-keygen -t ed25519 -N "" -C "mikrotik-minder@prod" -f ./minder_deploy
 #   Gitea/GitLab: equivalent UI in Settings → Deploy Keys
 ```
 
-### 4. Create a values file
+### 3. Create a values file
 
 `values-prod.yaml`:
 
 ```yaml
 config:
   server:
-    url: https://mikrotik-minder.<your-subdomain>.workers.dev
+    url: https://mikrotik-minder.sargeant.workers.dev
     agent_token_env: MTM_AGENT_TOKEN
   defaults:
     heartbeat_interval_seconds: 300
@@ -151,7 +131,7 @@ config:
 secrets:
   create: true                  # use external-secrets / sealed-secrets in real prod
   data:
-    MTM_AGENT_TOKEN: mtm_...    # from step 2
+    MTM_AGENT_TOKEN: mtm_...    # from step 1
     MTM_BACKUP_PASSWORD: "<long random; this encrypts the .backup files>"
     CORE_RTR_01_PASSWORD: "..."
     BRANCH_RTR_07_PASSWORD: "..."
@@ -159,7 +139,7 @@ secrets:
 git:
   sshKey: |
     -----BEGIN OPENSSH PRIVATE KEY-----
-    <paste contents of ./minder_deploy from step 3>
+    <paste contents of ./minder_deploy from step 2>
     -----END OPENSSH PRIVATE KEY-----
   # Optional: pre-pin remote host keys so first push doesn't have to accept-new
   knownHosts: |
@@ -176,10 +156,12 @@ resources:
 
 For real production, replace `secrets.data` with an externally-managed Secret — set `secrets.create: false` and `secrets.existingSecretName: minder-env`, then have external-secrets / sealed-secrets / vault-csi reconcile it.
 
-### 5. Install
+### 4. Install
 
 ```bash
-helm install minder ./charts/mikrotik-minder-agent \
+helm repo add calebsargeant https://charts.calebsargeant.com
+helm repo update
+helm install minder calebsargeant/mikrotik-minder-agent \
     --namespace minder --create-namespace \
     -f values-prod.yaml
 
@@ -187,7 +169,7 @@ kubectl -n minder rollout status deploy/minder-mikrotik-minder-agent
 kubectl -n minder logs -f deploy/minder-mikrotik-minder-agent
 ```
 
-### 6. Verify
+### 5. Verify
 
 Three checks, each catches a different class of misconfiguration:
 
@@ -205,15 +187,15 @@ kubectl -n minder exec deploy/minder-mikrotik-minder-agent -- \
     mikrotik-minder-agent export-once -c /etc/mikrotik-minder/config.yaml core-rtr-01 -v
 ```
 
-After a minute or two, the Worker dashboard should show every device with `last_status: ok` and one row per device under "Recent jobs". Configure your alert sinks (`/v1/admin/alert-routes`) and you're done.
+After a minute or two, every device's first heartbeat lands on the control plane. The OSS worker has no built-in operator UI — alerts surface on the Slack/Discord/webhook sink you specified when you got your agent token. (The visual fleet UI is the licensed Pages frontend, coming separately.)
 
 ### Onboarding a new device later
 
 1. Add the device under `config.devices` in your values file.
 2. Add its password to `secrets.data` (or your external secret store).
-3. `helm upgrade minder ./charts/mikrotik-minder-agent -n minder -f values-prod.yaml` — the pod restarts with the new config and the new device starts heartbeating on the next tick.
+3. `helm upgrade minder calebsargeant/mikrotik-minder-agent -n minder -f values-prod.yaml` — the pod restarts with the new config and the new device starts heartbeating on the next tick.
 
-The Worker auto-registers devices on first heartbeat, so step 1 is the only required action on the operator side. No worker-side action needed per device.
+The control plane auto-registers devices on first heartbeat, so step 1 is the only required action on the operator side.
 
 ## Positioning
 

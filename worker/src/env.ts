@@ -3,7 +3,6 @@ export interface Env {
   ADMIN_TOKEN: string;
   DEFAULT_HEARTBEAT_INTERVAL_SECONDS: string;
   DEFAULT_GRACE_SECONDS: string;
-  DASHBOARD_ROWS: string;
 }
 
 export type AppVariables = {
