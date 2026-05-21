@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.1.1 (2026-05-21)
+
+### Bug Fixes
+
+- Complete env.prod wrangler config + opt deploy into prod environment
+  ([`118bfb9`](https://github.com/MagmaMoose/mikrotik-minder/commit/118bfb94703437c25dd3134ea84f93b7976a1ddf))
+
+
 ## v1.1.0 (2026-05-21)
 
 ### Bug Fixes
