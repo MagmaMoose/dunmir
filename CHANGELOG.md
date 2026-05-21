@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.2.0 (2026-05-21)
+
+### Bug Fixes
+
+- **agent**: Default serviceAccountName to 'default' when create is false
+  ([`dc74c81`](https://github.com/MagmaMoose/mikrotik-minder/commit/dc74c81b3cc5ac77b1a90d8569188b487c6ff4f2))
+
+### Features
+
+- Bump agent to 0.0.1 + restore chart's image/secret helpers
+  ([`8d72c7d`](https://github.com/MagmaMoose/mikrotik-minder/commit/8d72c7d20834d1ed267b33aae3e9c29a88baccb4))
+
+
 ## v1.1.1 (2026-05-21)
 
 ### Bug Fixes
