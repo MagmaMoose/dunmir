@@ -32,11 +32,26 @@ DEFAULT_GRACE_SECONDS = "600"
 enabled = true
 
 # ── Hosted production environment ──────────────────────────────────────────────
-# Used by CI only: `wrangler deploy --env prod` / `wrangler d1 migrations apply minder --remote --env prod`
-# Set CLOUDFLARE_ACCOUNT_ID in repo secrets; do NOT run this locally unless you
-# intend to mutate the production database.
+# Used by CI only: `wrangler deploy --env prod` / `wrangler d1 migrations apply minder --remote --env prod`.
+# Do NOT run this locally unless you intend to mutate the live worker / database.
+#
+# Wrangler does NOT inherit `name`, `vars`, `triggers`, or `observability` into
+# environments — each has to be repeated here. Without `name`, `--env prod`
+# would deploy to a NEW worker called `mikrotik-minder-prod` (different URL,
+# missing the ADMIN_TOKEN secret bound to the live worker).
 [env.prod]
+name = "mikrotik-minder"
 account_id = "6e26afa31c37dee1dc82ad2f214f9b3c"
+
+[env.prod.triggers]
+crons = ["* * * * *"]
+
+[env.prod.vars]
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = "3600"
+DEFAULT_GRACE_SECONDS = "600"
+
+[env.prod.observability]
+enabled = true
 
 [[env.prod.d1_databases]]
 binding = "DB"

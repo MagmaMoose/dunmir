@@ -18,6 +18,12 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Opt into the `prod` GitHub Environment so env-scoped secrets resolve.
+    # If the user's CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets live at
+    # repo scope, they'll still resolve here too. If they're org-scoped with
+    # "selected repositories" visibility, the public mikrotik-minder repo needs
+    # to be in the selected list.
+    environment: prod
     permissions:
       contents: read
     steps:
