@@ -78,7 +78,7 @@ The supported deployment is the agent in a Kubernetes cluster that has L3 access
 
 The hosted control plane is at `https://mikrotik-minder.sargeant.workers.dev`. During the OSS preview, agent tokens are minted manually — [open an issue](https://github.com/magmamoose/mikrotik-minder/issues/new) with your operator name and we'll send back a token + the Slack/Discord/webhook URL(s) you want alerts routed to.
 
-(Self-hosting? Set `secrets.GITHUB_ACTIONS=…` for the deploy workflow, deploy your own worker, then `POST /v1/admin/agents` with your local `ADMIN_TOKEN` to mint a token. The rest of these steps are identical.)
+(Self-hosting? Set the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets required by [`.github/workflows/worker-deploy.yml`](.github/workflows/worker-deploy.yml), deploy your own worker, then `POST /v1/admin/agents` with your local `ADMIN_TOKEN` to mint a token. The rest of these steps are identical.)
 
 ### 2. Generate a git deploy key for the agent's export history
 
