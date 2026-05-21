@@ -16,6 +16,16 @@ nameOverride: ""
 fullnameOverride: ""
 
 # ----------------------------------------------------------------------------
+# ServiceAccount knobs. The agent doesn't talk to the k8s API, so the SA
+# defaults to no token mounted.
+# ----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""             # blank = use fullname
+  annotations: {}
+  automount: false     # the agent does not call the k8s API
+
+# ----------------------------------------------------------------------------
 # Agent config — rendered into a ConfigMap and mounted at
 # /etc/mikrotik-minder/config.yaml. Mirror the YAML shape from
 # agent/examples/config.example.yaml. Secrets are referenced by env-var name

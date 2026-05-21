@@ -7,8 +7,8 @@ description: |
   encrypted backups via SFTP, and reports heartbeats and job results to the
   Mikrotik Minder control plane.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.1
+appVersion: "0.0.1"
 home: https://github.com/magmamoose/mikrotik-minder
 sources:
   - https://github.com/magmamoose/mikrotik-minder
