@@ -282,14 +282,17 @@ admin.post("/commands", async (c) => {
 // secret-bearing /export body is delivered exactly once and never re-served.
 admin.get("/commands/:id/artifact", async (c) => {
   const id = c.req.param("id");
-  const row = await c.env.DB.prepare("SELECT artifact FROM commands WHERE id = ?1")
+  const row = await c.env.DB.prepare(
+    "UPDATE commands SET artifact = NULL WHERE id = ?1 AND artifact IS NOT NULL RETURNING artifact"
+  )
     .bind(id)
     .first<{ artifact: string | null }>();
-  if (!row) return c.json({ error: "not found" }, 404);
-  if (row.artifact === null) {
+  if (!row) {
+    // Either the row doesn't exist, or artifact was already NULL (already downloaded)
+    const exists = await c.env.DB.prepare("SELECT id FROM commands WHERE id = ?1").bind(id).first();
+    if (!exists) return c.json({ error: "not found" }, 404);
     return c.json({ error: "no artifact — already downloaded, or none produced" }, 410);
   }
-  await c.env.DB.prepare("UPDATE commands SET artifact = NULL WHERE id = ?1").bind(id).run();
   return c.text(row.artifact, 200, { "content-type": "text/plain; charset=utf-8" });
 });
 
