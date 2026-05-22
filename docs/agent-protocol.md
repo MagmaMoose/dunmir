@@ -197,7 +197,7 @@ A route stores `kind` (`webhook` | `slack` | `discord`), `url`, `events` (option
 - **Discord**: posted as `{username, embeds[]}` for inline display.
 - **Webhook**: the raw alert envelope (`{id, severity, kind, title, agent_id, device_id, job_id, payload, created_at}`) for routing into your own pipeline.
 
-Every delivery attempt is recorded in `alert_deliveries` with the HTTP status and any error.
+Every delivery attempt to a DB-configured route is recorded in `alert_deliveries` with the HTTP status and any error. Slack bot deliveries (see below) are logged but not written to `alert_deliveries`.
 
 ## Slack bot integration
 
