@@ -32,6 +32,9 @@ from .transports.ssh import SSHTransport
 
 log = logging.getLogger(__name__)
 
+# Maximum artifact size accepted by the worker (must match worker/src/routes/ingest.ts)
+_MAX_ARTIFACT_CHARS = 5_000_000
+
 
 def execute_command(
     cmd: CommandRef,
@@ -256,6 +259,17 @@ def _run_sensitive_export(
         _report(minder, cmd.id, "failed", result={"error": f"capture failed: {exc}"})
         return
     text = text.replace("\r\n", "\n")
+    if len(text) > _MAX_ARTIFACT_CHARS:
+        _report(
+            minder,
+            cmd.id,
+            "failed",
+            result={
+                "error": f"sensitive export too large ({len(text)} chars, max {_MAX_ARTIFACT_CHARS})",
+                "bytes": len(text),
+            },
+        )
+        return
     _report(minder, cmd.id, "succeeded", result={"bytes": len(text)}, artifact=text)
 
 
