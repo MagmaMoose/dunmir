@@ -283,7 +283,12 @@ admin.post("/commands", async (c) => {
 admin.get("/commands/:id/artifact", async (c) => {
   const id = c.req.param("id");
   const row = await c.env.DB.prepare(
-    "UPDATE commands SET artifact = NULL WHERE id = ?1 AND artifact IS NOT NULL RETURNING artifact"
+    `WITH old AS (
+       SELECT artifact FROM commands WHERE id = ?1 AND artifact IS NOT NULL
+     )
+     UPDATE commands SET artifact = NULL
+     WHERE id = ?1 AND artifact IS NOT NULL
+     RETURNING (SELECT artifact FROM old) AS artifact`
   )
     .bind(id)
     .first<{ artifact: string | null }>();
