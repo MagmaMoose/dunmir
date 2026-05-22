@@ -264,7 +264,7 @@ ingest.post("/commands/:id/result", async (c) => {
   const status = asEnum(body?.status, "status", ["succeeded", "failed"] as const);
   if (!status.ok) return c.json({ error: status.error }, 400);
   const result = body?.result;
-  if (result !== undefined && (typeof result !== "object" || result === null)) {
+  if (result !== undefined && (typeof result !== "object" || result === null || Array.isArray(result))) {
     return c.json({ error: "result must be an object" }, 400);
   }
   const artifact = asOptionalString(body?.artifact, "artifact", { max: 5_000_000 });
