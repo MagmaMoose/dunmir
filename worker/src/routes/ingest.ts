@@ -227,8 +227,8 @@ ingest.get("/commands", async (c) => {
          AND (scheduled_for IS NULL OR scheduled_for <= ?1)
        ORDER BY created_at LIMIT 20
      )
-     RETURNING commands.id, commands.device_id, commands.kind, commands.params, devices.name AS device_name
-     JOIN devices ON devices.id = commands.device_id`,
+     RETURNING commands.id, commands.device_id, commands.kind, commands.params,
+       (SELECT name FROM devices WHERE id = commands.device_id) AS device_name`,
   )
     .bind(now, agentId)
     .all<{ id: string; device_id: string; kind: string; params: string | null; device_name: string }>();
