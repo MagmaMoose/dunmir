@@ -199,6 +199,20 @@ A route stores `kind` (`webhook` | `slack` | `discord`), `url`, `events` (option
 
 Every delivery attempt is recorded in `alert_deliveries` with the HTTP status and any error.
 
+## Slack bot integration
+
+Separate from the DB-configured `slack` route (which uses an Incoming Webhook URL), the worker has a first-class Slack integration driven by environment config. When `SLACK_BOT_TOKEN` is set, **every** alert is also posted to Slack via the `chat.postMessage` Web API as a Block Kit message — in addition to any DB-configured routes.
+
+| Env var                  | Purpose                                                              |
+| ------------------------- | -------------------------------------------------------------------- |
+| `SLACK_BOT_TOKEN`         | Secret. `xoxb-…` bot token with the `chat:write` scope.              |
+| `SLACK_SUCCESS_CHANNEL`   | Channel ID for `info`-severity alerts (good news).                   |
+| `SLACK_FAILURE_CHANNEL`   | Channel ID for `warning` / `critical` alerts (needs attention).      |
+
+Routing is by severity: `info` → success channel, `warning` / `critical` → failure channel. An unset channel for a class is skipped. The bot must be a member of each channel (or have `chat:write.public`).
+
+With the default alert-kind severities, the success channel receives `heartbeat_recovered` and `manual` test alerts; the failure channel receives `heartbeat_missed`, `job_failed`, `update_failed`, `drift_detected`, and `update_available`.
+
 ## Quickstart curls
 
 ```bash
