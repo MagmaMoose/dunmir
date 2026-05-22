@@ -24,7 +24,7 @@ from .config import (
     update_check_interval,
 )
 from .export import ExportError, ExportResult, ExportRunner
-from .minder import JobReport, MinderClient, MinderError
+from .minder import CommandRef, JobReport, MinderClient, MinderError
 from .transports import ProbeResult, TransportError, build_transports
 from .updates import (
     UpdateCheckError,
@@ -163,12 +163,12 @@ class Daemon:
             if self._stop.wait(timeout=interval):
                 break
 
-    def _execute_command_via_daemon(self, cmd: dict, minder: MinderClient) -> None:
+    def _execute_command_via_daemon(self, cmd: CommandRef, minder: MinderClient) -> None:
         """Execute a command and update the relevant device state timestamps."""
         # Determine the device name from the command payload.
-        device_name = cmd.get("device_name")
+        device_name = cmd.device
         if not device_name:
-            log.warning("command missing device_name, skipping timestamp update")
+            log.warning("command missing device, skipping timestamp update")
             execute_command(
                 cmd,
                 self._config,
@@ -192,7 +192,7 @@ class Daemon:
             return
 
         # Determine the command kind.
-        command_kind = cmd.get("command", "")
+        command_kind = cmd.kind
         if command_kind in ("export", "sensitive_export"):
             self._run_export(device, minder)
         elif command_kind == "backup":
