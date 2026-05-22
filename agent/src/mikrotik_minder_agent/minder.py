@@ -160,7 +160,10 @@ class MinderClient:
 
             if resp.status_code >= 400:
                 detail = _safe_error(resp)
-                raise MinderError(f"minder {path} returned HTTP {resp.status_code}: {detail}", status_code=resp.status_code)
+                raise MinderError(
+                    f"minder {path} returned HTTP {resp.status_code}: {detail}",
+                    status_code=resp.status_code,
+                )
 
             try:
                 return resp.json()
@@ -188,7 +191,10 @@ class MinderClient:
 
             if resp.status_code >= 400:
                 detail = _safe_error(resp)
-                raise MinderError(f"minder GET {path} returned HTTP {resp.status_code}: {detail}", status_code=resp.status_code)
+                raise MinderError(
+                    f"minder GET {path} returned HTTP {resp.status_code}: {detail}",
+                    status_code=resp.status_code,
+                )
 
             try:
                 return resp.json()
