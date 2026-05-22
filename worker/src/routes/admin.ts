@@ -244,7 +244,10 @@ admin.post("/commands", async (c) => {
   const scheduledFor = asOptionalInt(body?.scheduled_for, "scheduled_for", { min: 0 });
   if (!scheduledFor.ok) return c.json({ error: scheduledFor.error }, 400);
   // Derive requested_by from the X-Auth-Email header (set by Cloudflare Access)
-  const requestedBy = c.req.header("X-Auth-Email") ?? "unknown";
+  const rawEmail = c.req.header("X-Auth-Email") ?? "";
+  const trimmed = rawEmail.trim();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const requestedBy = trimmed.length > 0 && trimmed.length <= 254 && emailRegex.test(trimmed) ? trimmed : "unknown";
   const params = body?.params;
   if (
     params !== undefined &&
