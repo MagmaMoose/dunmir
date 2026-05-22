@@ -16,6 +16,10 @@ log = logging.getLogger(__name__)
 class MinderError(RuntimeError):
     """Raised when the control plane returns an error or is unreachable."""
 
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 @dataclass
 class JobReport:
@@ -101,7 +105,7 @@ class MinderClient:
         try:
             data = self._get_json("/v1/ingest/commands")
         except MinderError as exc:
-            if "404" in str(exc):
+            if exc.status_code == 404:
                 return []
             raise
         items = data.get("commands") or []
@@ -156,7 +160,7 @@ class MinderClient:
 
             if resp.status_code >= 400:
                 detail = _safe_error(resp)
-                raise MinderError(f"minder {path} returned HTTP {resp.status_code}: {detail}")
+                raise MinderError(f"minder {path} returned HTTP {resp.status_code}: {detail}", status_code=resp.status_code)
 
             try:
                 return resp.json()
@@ -184,7 +188,7 @@ class MinderClient:
 
             if resp.status_code >= 400:
                 detail = _safe_error(resp)
-                raise MinderError(f"minder GET {path} returned HTTP {resp.status_code}: {detail}")
+                raise MinderError(f"minder GET {path} returned HTTP {resp.status_code}: {detail}", status_code=resp.status_code)
 
             try:
                 return resp.json()
