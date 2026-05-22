@@ -206,12 +206,13 @@ Separate from the DB-configured `slack` route (which uses an Incoming Webhook UR
 | Env var                  | Purpose                                                              |
 | ------------------------- | -------------------------------------------------------------------- |
 | `SLACK_BOT_TOKEN`         | Secret. `xoxb-…` bot token with the `chat:write` scope.              |
-| `SLACK_SUCCESS_CHANNEL`   | Channel ID for `info`-severity alerts (good news).                   |
+| `SLACK_INFO_CHANNEL`      | Channel ID for `info`-severity alerts (good news). Falls back to `SLACK_FAILURE_CHANNEL` if unset. |
 | `SLACK_FAILURE_CHANNEL`   | Channel ID for `warning` / `critical` alerts (needs attention).      |
+| `SLACK_SUCCESS_CHANNEL`   | Channel ID for success/wins class alerts (e.g., `heartbeat_recovered`, `manual`, `backup_succeeded`, `update_applied`). |
 
-Routing is by severity: `info` → success channel, `warning` / `critical` → failure channel. An unset channel for a class is skipped. The bot must be a member of each channel (or have `chat:write.public`).
+Routing is by alert kind: `info`-severity kinds → `SLACK_INFO_CHANNEL` (fallback to `SLACK_FAILURE_CHANNEL`), `warning`/`critical` kinds → `SLACK_FAILURE_CHANNEL`, and success/wins kinds → `SLACK_SUCCESS_CHANNEL`. An unset channel for a class is skipped. The bot must be a member of each channel (or have `chat:write.public`).
 
-With the default alert-kind severities, the success channel receives `heartbeat_recovered` and `manual` test alerts; the failure channel receives `heartbeat_missed`, `job_failed`, `update_failed`, `drift_detected`, and `update_available`.
+With the default alert-kind severities, the info channel receives `heartbeat_recovered` and `manual` test alerts; the failure channel receives `heartbeat_missed`, `job_failed`, `update_failed`, `drift_detected`, and `update_available`; the success channel receives `heartbeat_recovered`, `manual`, `backup_succeeded`, and `update_applied`.
 
 ## Quickstart curls
 
