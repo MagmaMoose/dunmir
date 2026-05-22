@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-05-22)
+
+### Bug Fixes
+
+- **worker**: Align Slack env doc with severity-based routing
+  ([`b504eef`](https://github.com/MagmaMoose/mikrotik-minder/commit/b504eef14c3225c8d33ebb160623c560a0dda154))
+
+### Documentation
+
+- **agent-protocol**: Clarify alert_deliveries scope for Slack bot
+  ([`d7b0367`](https://github.com/MagmaMoose/mikrotik-minder/commit/d7b0367d232dd29cbf78be81b2a08abf7f1bc6ec))
+
+- **agent-protocol**: Fix Slack bot env var table to match implementation
+  ([`33c4e3f`](https://github.com/MagmaMoose/mikrotik-minder/commit/33c4e3f5dde440324cfdd5f0ba4edea698ff2c99))
+
+### Features
+
+- **worker**: Route Slack alerts to 3 channels by kind + announce wins
+  ([`e81a81b`](https://github.com/MagmaMoose/mikrotik-minder/commit/e81a81b953392934356633e726a746e7b55ab100))
+
+- **worker**: Slack bot-token alert delivery
+  ([`08d06c3`](https://github.com/MagmaMoose/mikrotik-minder/commit/08d06c3e254a29ea1de18e04fbc0733f88093155))
+
+
 ## v1.2.1 (2026-05-22)
 
 ### Bug Fixes
