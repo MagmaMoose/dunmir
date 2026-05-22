@@ -17,6 +17,5 @@ CREATE TABLE commands (
   result        TEXT,                   -- JSON result summary the agent reports back
   artifact      TEXT                    -- transient show-sensitive export body; purged on download
 );
-CREATE INDEX commands_agent_idx  ON commands(agent_id, status);
 CREATE INDEX commands_device_idx ON commands(device_id, created_at DESC);
 CREATE INDEX commands_claim_idx  ON commands(agent_id, status, created_at);
