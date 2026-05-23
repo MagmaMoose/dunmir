@@ -322,4 +322,114 @@ function validateArtifact(value: unknown): { ok: true; value: string | null } | 
   return { ok: true, value };
 }
 
+// --- Backup uploads --------------------------------------------------------
+//
+// Agent PUTs each successful backup's encrypted body here as the raw request
+// body (`application/octet-stream`). The worker writes ciphertext to R2 and
+// catalogues the upload in `backup_files` so the Pro UI can list + download
+// it later. Limits:
+//
+//   - max 64 MiB per upload (well above typical RouterOS configs)
+//   - sha256 sent as a query string + matched against R2's MD5 we cannot
+//     reproduce, so we re-hash on the worker and reject mismatches (catches
+//     corruption-in-flight without trusting the client header)
+//   - `device` must match an agent-owned device; otherwise 403
+//   - `file_name` must look like a backup filename (no slashes, .backup suffix)
+//   - duplicate file_name for the same device → idempotent (200 + existing id)
+
+const MAX_BACKUP_BYTES = 64 * 1024 * 1024;
+const BACKUP_NAME_RE = /^[A-Za-z0-9._-]+\.backup$/;
+
+ingest.put("/backups/:device/:filename", async (c) => {
+  const agentId = c.get("agentId")!;
+  const deviceName = c.req.param("device");
+  const fileName = c.req.param("filename");
+  const claimedSha = (c.req.query("sha256") ?? "").toLowerCase();
+
+  if (!BACKUP_NAME_RE.test(fileName)) {
+    return c.json({ error: "file_name must match [A-Za-z0-9._-]+\\.backup" }, 400);
+  }
+  if (claimedSha && !/^[a-f0-9]{64}$/.test(claimedSha)) {
+    return c.json({ error: "sha256 must be 64 lowercase hex chars" }, 400);
+  }
+
+  const dev = await c.env.DB.prepare(
+    "SELECT id FROM devices WHERE agent_id = ?1 AND name = ?2",
+  )
+    .bind(agentId, deviceName)
+    .first<{ id: string }>();
+  if (!dev) return c.json({ error: "device not found for this agent" }, 404);
+
+  // Idempotency: if this filename is already catalogued for this device,
+  // return the existing row instead of double-writing R2.
+  const existing = await c.env.DB.prepare(
+    "SELECT id FROM backup_files WHERE device_id = ?1 AND file_name = ?2",
+  )
+    .bind(dev.id, fileName)
+    .first<{ id: string }>();
+  if (existing) return c.json({ id: existing.id, deduped: true });
+
+  // Buffer the body so we can both hash it and write to R2. Workers cap us
+  // at 100 MiB anyway; we additionally enforce MAX_BACKUP_BYTES.
+  const buf = await c.req.arrayBuffer();
+  if (buf.byteLength === 0) return c.json({ error: "empty body" }, 400);
+  if (buf.byteLength > MAX_BACKUP_BYTES) {
+    return c.json(
+      { error: `body exceeds ${MAX_BACKUP_BYTES} bytes (got ${buf.byteLength})` },
+      413,
+    );
+  }
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  const computedSha = [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  if (claimedSha && claimedSha !== computedSha) {
+    return c.json(
+      { error: "sha256 mismatch", claimed: claimedSha, computed: computedSha },
+      400,
+    );
+  }
+
+  const r2Key = `backups/${dev.id}/${fileName}`;
+  await c.env.BACKUPS.put(r2Key, buf, {
+    httpMetadata: { contentType: "application/octet-stream" },
+    customMetadata: {
+      device_id: dev.id,
+      device_name: deviceName,
+      agent_id: agentId,
+      sha256: computedSha,
+    },
+  });
+
+  const id = newId("bkp");
+  await c.env.DB.prepare(
+    `INSERT INTO backup_files (id, agent_id, device_id, file_name, r2_key, size_bytes, sha256, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+  )
+    .bind(id, agentId, dev.id, fileName, r2Key, buf.byteLength, computedSha, nowSeconds())
+    .run();
+
+  return c.json(
+    { id, r2_key: r2Key, size_bytes: buf.byteLength, sha256: computedSha },
+    201,
+  );
+});
+
+// Allow the agent to drop a catalog row when retention prunes it locally.
+// The body is gone either way; this keeps D1/R2 in sync with the PVC.
+ingest.delete("/backups/:id", async (c) => {
+  const agentId = c.get("agentId")!;
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare(
+    "SELECT r2_key FROM backup_files WHERE id = ?1 AND agent_id = ?2",
+  )
+    .bind(id, agentId)
+    .first<{ r2_key: string }>();
+  if (!row) return c.json({ error: "backup not found for this agent" }, 404);
+
+  await c.env.BACKUPS.delete(row.r2_key);
+  await c.env.DB.prepare("DELETE FROM backup_files WHERE id = ?1").bind(id).run();
+  return c.json({ ok: true });
+});
+
 export default ingest;

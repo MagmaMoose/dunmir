@@ -51,6 +51,13 @@ class BackupResult:
     sha256: str
     retained: int   # files remaining after retention sweep
     pruned: int     # files removed during retention sweep
+    # Control-plane upload status — the .backup body is also streamed to the
+    # worker's R2 bucket so the Pro UI can download it later. The local PVC
+    # copy is still authoritative; an upload failure leaves a warning on the
+    # job but does NOT fail the backup itself.
+    uploaded_id: str | None = None     # backup_files.id once upload completes
+    upload_skipped: bool = True        # True when no MinderClient was provided
+    upload_error: str | None = None    # set on transient/4xx/5xx upload failures
 
 
 class _BackupChannel(Protocol):
@@ -64,6 +71,18 @@ class _BackupChannel(Protocol):
         *,
         timeout: float | None = ...,
     ) -> int: ...
+
+
+class _BackupUploader(Protocol):
+    """Just enough of MinderClient to ship a backup body upstream."""
+
+    def upload_backup(
+        self,
+        device: str,
+        file_path: Path,
+        *,
+        sha256: str | None = ...,
+    ) -> str: ...
 
 
 class BackupRunner:
@@ -91,6 +110,7 @@ class BackupRunner:
         device: DeviceConfig,
         *,
         channel: _BackupChannel | None = None,
+        uploader: _BackupUploader | None = None,
     ) -> BackupResult:
         started = int(time.time())
         ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(started))
@@ -141,6 +161,23 @@ class BackupRunner:
         sha = _sha256(local_path)
         pruned = self._rotate(local_dir, retain=self._bcfg.retention)
         retained = len(list(local_dir.glob("*.backup")))
+
+        # Stream the encrypted body to R2 via the worker. We do this BEFORE
+        # the return so the job that's about to be posted can carry the
+        # backup_id. Failures are non-fatal: the PVC copy is authoritative.
+        uploaded_id: str | None = None
+        upload_skipped = uploader is None
+        upload_error: str | None = None
+        if uploader is not None:
+            try:
+                uploaded_id = uploader.upload_backup(device.name, local_path, sha256=sha)
+            except Exception as exc:  # broad: upload is non-fatal, surfaced in result
+                upload_error = str(exc)
+                log.warning(
+                    "device %s: backup upload failed (%s); local copy at %s",
+                    device.name, exc, local_path,
+                )
+
         return BackupResult(
             started_at=started,
             finished_at=int(time.time()),
@@ -150,6 +187,9 @@ class BackupRunner:
             sha256=sha,
             retained=retained,
             pruned=pruned,
+            uploaded_id=uploaded_id,
+            upload_skipped=upload_skipped,
+            upload_error=upload_error,
         )
 
     # --- Internals ---

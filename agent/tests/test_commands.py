@@ -124,9 +124,15 @@ class _Runner:
         self._result = result
         self._error = error
         self.calls: list[DeviceConfig] = []
+        self.uploaders: list[Any] = []
 
-    def run(self, device: DeviceConfig) -> Any:
+    def run(self, device: DeviceConfig, *, uploader: Any | None = None) -> Any:
+        # BackupRunner.run gained an `uploader` kwarg so the agent can stream
+        # the encrypted body to the worker's R2 bucket. ExportRunner.run does
+        # NOT take this kwarg — but tests use a single fake for both kinds,
+        # so we accept and ignore it on the export path.
         self.calls.append(device)
+        self.uploaders.append(uploader)
         if self._error is not None:
             raise self._error
         return self._result
@@ -145,6 +151,9 @@ def test_backup_success_reports_succeeded_and_mirrors_job() -> None:
     )
 
     assert len(runner.calls) == 1
+    # Dispatcher must pass the MinderClient as the uploader so the encrypted
+    # body lands in R2 alongside the local PVC copy.
+    assert runner.uploaders == [minder]
     assert minder.results[-1]["status"] == "succeeded"
     assert minder.results[-1]["result"]["size_bytes"] == 98765
     assert minder.results[-1]["artifact"] is None

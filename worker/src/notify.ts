@@ -124,7 +124,7 @@ async function deliverToSlackBot(env: Env, alert: StoredAlert): Promise<void> {
         authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
         "content-type": "application/json; charset=utf-8",
       },
-      body: JSON.stringify(slackBotMessage(alert, channel)),
+      body: JSON.stringify(slackBotMessage(alert, channel, env.PRO_UI_URL)),
     });
     // Slack returns HTTP 200 even for logical failures; the body carries `ok`.
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -248,10 +248,28 @@ const SEVERITY_EMOJI: Record<Severity, string> = {
 };
 
 /** Block Kit message for the Slack Web API `chat.postMessage`. */
-function slackBotMessage(alert: StoredAlert, channel: string) {
+function slackBotMessage(alert: StoredAlert, channel: string, proUiUrl?: string) {
   const detailLines = renderFields(alert)
     .map((f) => `*${f.title}:* ${f.value}`)
     .join("\n");
+  // Build a deep link to the Pro UI device page when we can. The device page
+  // hosts the "Backups" section + the timeline, so for kinds that have a
+  // download or follow-up action this is where the operator actually wants
+  // to land. We append it as a Block Kit action button so it renders well
+  // both inline and as the notification preview.
+  const linkButton = proUiUrl && alert.device_id
+    ? {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: actionLabelFor(alert.kind), emoji: true },
+            url: `${proUiUrl.replace(/\/$/, "")}/devices/${encodeURIComponent(alert.device_id)}`,
+            style: alert.severity === "critical" ? "danger" : undefined,
+          },
+        ],
+      }
+    : null;
   return {
     channel,
     // `text` is the notification fallback (lockscreen / a11y).
@@ -275,6 +293,7 @@ function slackBotMessage(alert: StoredAlert, channel: string) {
       ...(detailLines
         ? [{ type: "section", text: { type: "mrkdwn", text: detailLines.slice(0, 2900) } }]
         : []),
+      ...(linkButton ? [linkButton] : []),
       {
         type: "context",
         elements: [
@@ -286,6 +305,16 @@ function slackBotMessage(alert: StoredAlert, channel: string) {
       },
     ],
   };
+}
+
+// What the "View in Pro" CTA button says depends on the alert kind. The
+// generic label is "Open device"; backup_succeeded gets a more specific
+// "Download backup" hint so operators know they can fetch the body from
+// there.
+function actionLabelFor(kind: string): string {
+  if (kind === "backup_succeeded") return "Download backup";
+  if (kind === "update_applied") return "View update";
+  return "Open device";
 }
 
 function renderFields(alert: StoredAlert): { title: string; value: string; short?: boolean }[] {

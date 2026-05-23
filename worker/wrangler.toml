@@ -18,6 +18,14 @@ database_name = "minder"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
+# R2 bucket for encrypted device backups. The agent PUTs ciphertext bodies
+# (already AES-encrypted by RouterOS); the worker streams them back to the
+# Pro UI on download. Self-hosters: run `wrangler r2 bucket create <name>`
+# and override the bucket_name here.
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "mikrotik-minder-backups"
+
 # Secrets (set via `wrangler secret put <NAME>`):
 #   ADMIN_TOKEN      - bearer token for /v1/admin/* endpoints. Long random string.
 #   SLACK_BOT_TOKEN  - optional. xoxb-… bot token; enables Slack alert delivery.
@@ -33,6 +41,9 @@ DEFAULT_GRACE_SECONDS = "600"
 SLACK_SUCCESS_CHANNEL = ""
 SLACK_FAILURE_CHANNEL = ""
 SLACK_INFO_CHANNEL = ""
+# Public base URL of the Pro UI. Used to build deep links in alerts (Slack
+# "Download" buttons, etc.). Leave empty to suppress link rendering.
+PRO_UI_URL = ""
 
 [observability]
 enabled = true
@@ -60,6 +71,7 @@ DEFAULT_GRACE_SECONDS = "600"
 SLACK_SUCCESS_CHANNEL = "C0B5BJDHZTM"
 SLACK_FAILURE_CHANNEL = "C0A9FT7355Z"
 SLACK_INFO_CHANNEL = "C0A9RSQ3G92"
+PRO_UI_URL = "https://mikrotik-minder-pro.pages.dev"
 
 [env.prod.observability]
 enabled = true
@@ -69,3 +81,7 @@ binding = "DB"
 database_name = "minder"
 database_id = "03bb68db-e2c1-4069-ad01-e32cce5efb32"
 migrations_dir = "migrations"
+
+[[env.prod.r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "mikrotik-minder-backups"

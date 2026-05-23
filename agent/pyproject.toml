@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mikrotik-minder-agent"
-version = "0.0.2"
+version = "0.0.3"
 description = "Local agent for Mikrotik Minder: connects to RouterOS over API/SSH and reports heartbeats and job outcomes to the control plane."
 readme = "README.md"
 license = "Apache-2.0"

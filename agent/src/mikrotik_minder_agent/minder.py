@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -139,6 +140,62 @@ class MinderClient:
         if artifact is not None:
             body["artifact"] = artifact
         self._post_json(f"/v1/ingest/commands/{cmd_id}/result", body)
+
+    def upload_backup(
+        self,
+        device: str,
+        file_path: Path,
+        *,
+        sha256: str | None = None,
+    ) -> str:
+        """Stream an encrypted backup body to the worker. Returns the backup id.
+
+        Body is the raw RouterOS-encrypted ``.backup`` file — we never touch
+        plaintext. The worker writes it to R2 and catalogues the metadata so
+        the Pro UI can list / download it. Older workers without backup
+        endpoints return 404 → ``MinderError(status_code=404)`` lets the
+        caller treat the upload as optional.
+        """
+        name = file_path.name
+        path = f"/v1/ingest/backups/{device}/{name}"
+        if sha256:
+            path += f"?sha256={sha256}"
+        with file_path.open("rb") as f:
+            body = f.read()
+        last_exc: Exception | None = None
+        for attempt in (1, 2):
+            try:
+                resp = self._client.put(
+                    path,
+                    content=body,
+                    headers={"content-type": "application/octet-stream"},
+                    timeout=self._server.timeout_seconds * 6,
+                )
+            except httpx.HTTPError as exc:
+                last_exc = exc
+                if attempt == 1:
+                    log.warning("minder PUT %s transport error, retrying once: %s", path, exc)
+                    continue
+                raise MinderError(f"transport error uploading backup: {exc}") from exc
+
+            if 500 <= resp.status_code < 600 and attempt == 1:
+                log.warning("minder PUT %s -> %s, retrying once", path, resp.status_code)
+                continue
+
+            if resp.status_code >= 400:
+                detail = _safe_error(resp)
+                raise MinderError(
+                    f"minder PUT {path} returned HTTP {resp.status_code}: {detail}",
+                    status_code=resp.status_code,
+                )
+
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                raise MinderError("upload response was not JSON") from exc
+            return str(data.get("id") or "")
+
+        raise MinderError(f"upload backup {name} failed: {last_exc}")
 
     # --- Internals ---
 

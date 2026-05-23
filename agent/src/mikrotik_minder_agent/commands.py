@@ -86,7 +86,10 @@ def _run_backup(
         return
     started = int(time.time())
     try:
-        res = runner.run(device)
+        # The MinderClient doubles as the uploader so the body lands in R2 as
+        # part of the same command run — without this the operator's manual
+        # backup wouldn't get a Download link in the Pro UI.
+        res = runner.run(device, uploader=minder)
     except BackupError as exc:
         _report(minder, cmd.id, "failed", result={"error": str(exc)})
         _send_failure_job(minder, device, "backup", started, str(exc))
@@ -99,6 +102,9 @@ def _run_backup(
         "sha256": res.sha256,
         "retained": res.retained,
         "pruned": res.pruned,
+        "uploaded_id": res.uploaded_id,
+        "upload_skipped": res.upload_skipped,
+        "upload_error": res.upload_error,
     }
     summary = backup_summary(res)
     _send_job(

@@ -311,4 +311,52 @@ admin.get("/commands/:id/artifact", async (c) => {
   });
 });
 
+// --- Backups --------------------------------------------------------------
+// The agent uploads encrypted backups via PUT /v1/ingest/backups/...; these
+// admin endpoints let the Pro UI list and download them. The body in R2 is
+// already AES-encrypted by RouterOS, so the worker never holds plaintext.
+
+admin.get("/devices/:id/backups", async (c) => {
+  const id = c.req.param("id");
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, file_name, size_bytes, sha256, created_at
+       FROM backup_files
+      WHERE device_id = ?1
+   ORDER BY created_at DESC
+      LIMIT 200`,
+  )
+    .bind(id)
+    .all();
+  return c.json({ backups: results });
+});
+
+// Stream the encrypted backup body from R2. The Pro UI proxies this so the
+// browser never talks to R2 directly. No caching headers — the body is a
+// sensitive ciphertext blob, and we don't want intermediates retaining it.
+admin.get("/backups/:id/download", async (c) => {
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare(
+    "SELECT file_name, r2_key, size_bytes, sha256 FROM backup_files WHERE id = ?1",
+  )
+    .bind(id)
+    .first<{ file_name: string; r2_key: string; size_bytes: number; sha256: string }>();
+  if (!row) return c.json({ error: "not found" }, 404);
+
+  const obj = await c.env.BACKUPS.get(row.r2_key);
+  if (!obj) {
+    // D1 row exists but R2 body is missing — orphan. Surface as 410 so the UI
+    // can prune the listing without 5xx-style panic.
+    return c.json({ error: "backup body missing from storage" }, 410);
+  }
+  return new Response(obj.body, {
+    headers: {
+      "content-type": "application/octet-stream",
+      "content-disposition": `attachment; filename="${row.file_name}"`,
+      "content-length": String(row.size_bytes),
+      "x-content-sha256": row.sha256,
+      "Cache-Control": "no-store",
+    },
+  });
+});
+
 export default admin;
