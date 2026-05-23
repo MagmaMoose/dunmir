@@ -360,15 +360,6 @@ ingest.put("/backups/:device/:filename", async (c) => {
     .first<{ id: string }>();
   if (!dev) return c.json({ error: "device not found for this agent" }, 404);
 
-  // Idempotency: if this filename is already catalogued for this device,
-  // return the existing row instead of double-writing R2.
-  const existing = await c.env.DB.prepare(
-    "SELECT id FROM backup_files WHERE device_id = ?1 AND file_name = ?2",
-  )
-    .bind(dev.id, fileName)
-    .first<{ id: string }>();
-  if (existing) return c.json({ id: existing.id, deduped: true });
-
   // Buffer the body so we can both hash it and write to R2. Workers cap us
   // at 100 MiB anyway; we additionally enforce MAX_BACKUP_BYTES.
   const buf = await c.req.arrayBuffer();
@@ -388,6 +379,24 @@ ingest.put("/backups/:device/:filename", async (c) => {
       { error: "sha256 mismatch", claimed: claimedSha, computed: computedSha },
       400,
     );
+  }
+
+  // Idempotency: if this filename is already catalogued for this device,
+  // return the existing row instead of double-writing R2. But verify the
+  // sha256 matches to prevent silent overwrite of different content.
+  const existing = await c.env.DB.prepare(
+    "SELECT id, sha256 FROM backup_files WHERE device_id = ?1 AND file_name = ?2",
+  )
+    .bind(dev.id, fileName)
+    .first<{ id: string; sha256: string | null }>();
+  if (existing) {
+    if (existing.sha256 && existing.sha256 !== computedSha) {
+      return c.json(
+        { error: "sha256 mismatch with existing backup", existing: existing.sha256, computed: computedSha },
+        409,
+      );
+    }
+    return c.json({ id: existing.id, deduped: true });
   }
 
   const r2Key = `backups/${dev.id}/${fileName}`;
