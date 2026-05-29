@@ -35,6 +35,15 @@ from .updates import (
 
 log = logging.getLogger(__name__)
 
+# Spread each device's first heavy job (export / update_check / backup) across a
+# short window after start-up. Per-device schedule state is in-memory only, so a
+# pod restart would otherwise re-run everything for every device on the first
+# tick — a 20-device fleet would hammer all routers (and queue 20 git commits)
+# at once. Offset is deterministic per device index and capped so even large
+# fleets stay bounded.
+_STARTUP_STAGGER_STEP_SECONDS = 10.0
+_STARTUP_STAGGER_MAX_SECONDS = 300.0
+
 
 @dataclass
 class DeviceState:
@@ -44,6 +53,7 @@ class DeviceState:
     last_update_check: float = 0.0
     last_backup: float = 0.0
     consecutive_failures: int = 0
+    startup_offset: float = 0.0  # seconds to delay this device's first tick (anti-stampede)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -54,7 +64,15 @@ class Daemon:
         self._config = config
         self._dry_run = dry_run
         self._stop = threading.Event()
-        self._state: dict[str, DeviceState] = {d.name: DeviceState() for d in config.devices}
+        # Stagger first ticks so a (re)start doesn't stampede the whole fleet.
+        self._state: dict[str, DeviceState] = {
+            d.name: DeviceState(
+                startup_offset=min(
+                    index * _STARTUP_STAGGER_STEP_SECONDS, _STARTUP_STAGGER_MAX_SECONDS,
+                ),
+            )
+            for index, d in enumerate(config.devices)
+        }
         self._exporter: ExportRunner | None = None
         if config.git is not None:
             try:
@@ -133,7 +151,12 @@ class Daemon:
 
     def _device_loop(self, device: DeviceConfig, minder: MinderClient) -> None:
         interval = heartbeat_interval(device, self._config.defaults)
-        log.info("device %s: every %ds", device.name, interval)
+        offset = self._state[device.name].startup_offset
+        log.info("device %s: every %ds (first tick +%.0fs)", device.name, interval, offset)
+        # Hold off the first tick by this device's stagger offset so heartbeats and
+        # heavy jobs spread out after start-up instead of all firing at once.
+        if offset and self._stop.wait(timeout=offset):
+            return
         while not self._stop.is_set():
             self._tick(device, minder)
             if self._stop.wait(timeout=interval):

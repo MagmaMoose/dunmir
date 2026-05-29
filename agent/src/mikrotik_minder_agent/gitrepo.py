@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -87,20 +88,32 @@ class GitRepo:
         self.root = Path(root).expanduser().resolve()
         self._author_name = author_name
         self._author_email = author_email
+        # The daemon shares ONE GitRepo across per-device threads. Serialise the
+        # operations that touch the index / working tree so concurrent device
+        # exports can't race on .git/index.lock or let one device's commit
+        # swallow another's staged file. Re-entrant because write_and_commit
+        # calls ensure_initialised while already holding it.
+        self._commit_lock = threading.RLock()
+        # A push doesn't touch the index, but two concurrent `git push` of the
+        # same ref can hit remote ref-lock contention and raise a *false* push
+        # error. Serialise pushes on their own lock so a slow push never blocks
+        # a commit (and vice versa).
+        self._push_lock = threading.Lock()
 
     # --- Public API ---
 
     def ensure_initialised(self) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
-        if not (self.root / ".git").exists():
-            self._run(["init", "--initial-branch=main"])
-            # Pin per-repo identity so commits don't pick up global git config.
-            self._run(["config", "user.name", self._author_name])
-            self._run(["config", "user.email", self._author_email])
-            # Unattended exports must not block on commit/tag signing (e.g. when the
-            # operator's global git config points at a GUI signer like 1Password).
-            self._run(["config", "commit.gpgsign", "false"])
-            self._run(["config", "tag.gpgsign", "false"])
+        with self._commit_lock:
+            self.root.mkdir(parents=True, exist_ok=True)
+            if not (self.root / ".git").exists():
+                self._run(["init", "--initial-branch=main"])
+                # Pin per-repo identity so commits don't pick up global git config.
+                self._run(["config", "user.name", self._author_name])
+                self._run(["config", "user.email", self._author_email])
+                # Unattended exports must not block on commit/tag signing (e.g. when the
+                # operator's global git config points at a GUI signer like 1Password).
+                self._run(["config", "commit.gpgsign", "false"])
+                self._run(["config", "tag.gpgsign", "false"])
 
     def push(
         self,
@@ -122,28 +135,29 @@ class GitRepo:
         # Use a one-shot remote URL via -c remote.origin.url so we never write the
         # token into the repo's `.git/config`. Same idea for SSH so the agent can
         # rotate `ssh_key_path` without leaving stale config behind.
-        try:
-            subprocess.run(  # noqa: S603 - absolute git path, fixed arg list
-                [
-                    self._git,
-                    "-c", f"remote.{_REMOTE_NAME}.url={push_url}",
-                    "push", "--", _REMOTE_NAME, f"HEAD:{branch}",
-                ],
-                cwd=self.root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise GitPushError(f"git push timed out after {timeout}s") from exc
-        except subprocess.CalledProcessError as exc:
-            stderr = (exc.stderr or "").strip()
-            # Make sure no token ever appears in error text we hand back.
-            if token:
-                stderr = stderr.replace(token, "[REDACTED]")
-            raise GitPushError(f"git push failed ({exc.returncode}): {stderr}") from exc
+        with self._push_lock:
+            try:
+                subprocess.run(  # noqa: S603 - absolute git path, fixed arg list
+                    [
+                        self._git,
+                        "-c", f"remote.{_REMOTE_NAME}.url={push_url}",
+                        "push", "--", _REMOTE_NAME, f"HEAD:{branch}",
+                    ],
+                    cwd=self.root,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=timeout,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise GitPushError(f"git push timed out after {timeout}s") from exc
+            except subprocess.CalledProcessError as exc:
+                stderr = (exc.stderr or "").strip()
+                # Make sure no token ever appears in error text we hand back.
+                if token:
+                    stderr = stderr.replace(token, "[REDACTED]")
+                raise GitPushError(f"git push failed ({exc.returncode}): {stderr}") from exc
 
     def write_and_commit(
         self,
@@ -156,33 +170,39 @@ class GitRepo:
 
         Returns the commit info, or ``None`` when the file already matched on
         disk (no commit was made).
+
+        Holds the commit lock for the whole stage→commit sequence so a
+        concurrent device export can't interleave between ``git add`` and
+        ``git commit`` (which would swallow this file into the other's commit
+        or collide on ``.git/index.lock``).
         """
-        self.ensure_initialised()
-        target = self.root / relative_path
-        target.parent.mkdir(parents=True, exist_ok=True)
+        with self._commit_lock:
+            self.ensure_initialised()
+            target = self.root / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
 
-        # Avoid a commit when content is unchanged. Compare bytes to be precise.
-        if target.exists() and target.read_text() == content:
-            return None
+            # Avoid a commit when content is unchanged. Compare bytes to be precise.
+            if target.exists() and target.read_text() == content:
+                return None
 
-        target.write_text(content)
-        rel = target.relative_to(self.root)
-        self._run(["add", str(rel)])
+            target.write_text(content)
+            rel = target.relative_to(self.root)
+            self._run(["add", str(rel)])
 
-        # If `git add` produced no staged delta (e.g. content matched HEAD already), bail.
-        if not self._has_staged_changes():
-            return None
+            # If `git add` produced no staged delta (e.g. content matched HEAD already), bail.
+            if not self._has_staged_changes():
+                return None
 
-        # Numstat BEFORE commit so we can capture deltas against the index.
-        added, removed = self._staged_numstat(rel)
-        self._run(["commit", "-m", message])
-        sha = self._run(["rev-parse", "HEAD"]).strip()
-        return CommitResult(
-            sha=sha,
-            lines_added=added,
-            lines_removed=removed,
-            files_changed=1,
-        )
+            # Numstat BEFORE commit so we can capture deltas against the index.
+            added, removed = self._staged_numstat(rel)
+            self._run(["commit", "-m", message])
+            sha = self._run(["rev-parse", "HEAD"]).strip()
+            return CommitResult(
+                sha=sha,
+                lines_added=added,
+                lines_removed=removed,
+                files_changed=1,
+            )
 
     # --- Internals ---
 

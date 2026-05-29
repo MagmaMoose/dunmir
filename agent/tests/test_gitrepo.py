@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -50,3 +51,48 @@ def test_git_binary_missing_is_explicit(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(_shutil, "which", lambda _name: None)
     with pytest.raises(Exception, match="git"):
         GitRepo(tmp_path / "x")
+
+
+def test_concurrent_commits_are_serialised(tmp_path: Path) -> None:
+    """The daemon shares one GitRepo across one-thread-per-device exports.
+
+    Without an internal lock, concurrent ``git add``/``commit`` race on
+    ``.git/index.lock`` and a commit can swallow another device's staged file.
+    With the lock, every device gets its own clean, single-file commit.
+    """
+    repo = GitRepo(tmp_path / "configs")
+    repo.ensure_initialised()
+
+    n = 12
+    start = threading.Barrier(n)
+    results: dict[int, object] = {}
+    errors: list[Exception] = []
+
+    def worker(i: int) -> None:
+        try:
+            start.wait()  # release all threads together to maximise contention
+            results[i] = repo.write_and_commit(
+                f"devices/dev{i:02d}/exports/latest.rsc",
+                f"config for device {i}\n",
+                message=f"dev{i:02d}: export",
+            )
+        except Exception as exc:  # record so the assertion can report the failure
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"concurrent commits raised: {errors}"
+    # One commit per device, and the history has exactly n commits (none swallowed).
+    assert len(results) == n
+    assert all(r is not None for r in results.values())
+    commit_count = int(repo._run(["rev-list", "--count", "HEAD"]).strip())
+    assert commit_count == n
+    # Every device's file landed intact and nothing is left staged/uncommitted.
+    for i in range(n):
+        path = tmp_path / "configs" / f"devices/dev{i:02d}/exports/latest.rsc"
+        assert path.read_text() == f"config for device {i}\n"
+    assert repo._run(["status", "--porcelain"]).strip() == ""
