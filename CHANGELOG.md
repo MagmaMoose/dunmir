@@ -2,6 +2,43 @@
 
 <!-- version list -->
 
+## v1.5.1 (2026-05-29)
+
+### Bug Fixes
+
+- **agent**: Serialise shared git repo and stagger device startup
+  ([#27](https://github.com/MagmaMoose/mikrotik-minder/pull/27),
+  [`495a770`](https://github.com/MagmaMoose/mikrotik-minder/commit/495a770732b8726f28281eb6088cdba0c24bab12))
+
+### Build System
+
+- **deps**: Bump actions/checkout from 4.3.1 to 6.0.2
+  ([#7](https://github.com/MagmaMoose/mikrotik-minder/pull/7),
+  [`20d31fc`](https://github.com/MagmaMoose/mikrotik-minder/commit/20d31fc427ea118be0d9764a9b9fe74649855a48))
+
+- **deps**: Bump cloudflare/wrangler-action from 3.15.0 to 4.0.0
+  ([#10](https://github.com/MagmaMoose/mikrotik-minder/pull/10),
+  [`4680ff5`](https://github.com/MagmaMoose/mikrotik-minder/commit/4680ff5433ddc3ba00db41a6ec14811b0c2d574b))
+
+- **deps**: Bump docker/build-push-action from 6.19.2 to 7.2.0
+  ([#9](https://github.com/MagmaMoose/mikrotik-minder/pull/9),
+  [`b8e30f9`](https://github.com/MagmaMoose/mikrotik-minder/commit/b8e30f95f0b4335357367a06bcf3d58d14fff0dc))
+
+- **deps**: Bump docker/setup-qemu-action from 3.7.0 to 4.0.0
+  ([#8](https://github.com/MagmaMoose/mikrotik-minder/pull/8),
+  [`190e47c`](https://github.com/MagmaMoose/mikrotik-minder/commit/190e47c837b4b723bc099b4d29de550c60bfb3f1))
+
+- **deps**: Bump the npm_and_yarn group across 1 directory with 2 updates
+  ([#4](https://github.com/MagmaMoose/mikrotik-minder/pull/4),
+  [`9e23f7c`](https://github.com/MagmaMoose/mikrotik-minder/commit/9e23f7c2b24412916eb6dd4165db4e1e303d825a))
+
+### Continuous Integration
+
+- Move runners to Node 24 and finish action deprecation cleanup
+  ([#17](https://github.com/MagmaMoose/mikrotik-minder/pull/17),
+  [`570423b`](https://github.com/MagmaMoose/mikrotik-minder/commit/570423b7c69d85b46f5d05887e42bd3d7f411b83))
+
+
 ## v1.5.0 (2026-05-23)
 
 ### Bug Fixes
