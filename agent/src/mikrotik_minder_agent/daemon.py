@@ -158,7 +158,12 @@ class Daemon:
         if offset and self._stop.wait(timeout=offset):
             return
         while not self._stop.is_set():
-            self._tick(device, minder)
+            try:
+                self._tick(device, minder)
+            except Exception:
+                # A single tick must never kill this device's thread — that would
+                # silently take the router dark with no further probes or alerts.
+                log.exception("device %s: unexpected error in tick (continuing)", device.name)
             if self._stop.wait(timeout=interval):
                 break
 
@@ -353,8 +358,10 @@ class Daemon:
                 ),
             )
         except MinderError as exc:
+            # The heartbeat already conveyed the device's status; a failed
+            # secondary job POST must not flip a healthy device to "failed".
             log.error("device %s job send failed: %s", device.name, exc)
-            return False
+            return ok
 
         if previous != status_label:
             log.info("device %s status %s -> %s", device.name, previous, status_label)

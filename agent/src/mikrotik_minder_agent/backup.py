@@ -124,25 +124,27 @@ class BackupRunner:
         save_timeout = self._cfg.defaults.backup_save_timeout_seconds
         pull_timeout = self._cfg.defaults.backup_pull_timeout_seconds
 
-        # 1. Create the backup on the router.
+        # Steps 1-3 share one try/finally so the on-router artifact is always
+        # cleaned up — even if `save` times out *after* RouterOS created the
+        # file. A `/file remove` for a name that was never created is a no-op.
         try:
-            ssh.capture(
-                f'/system backup save name="{name}" '
-                f'password="{self._bcfg.password}" encryption=aes-sha256',
-                timeout=save_timeout,
-            )
-        except TransportError as exc:
-            raise BackupError(f"backup save failed: {exc}") from exc
+            # 1. Create the backup on the router.
+            try:
+                ssh.capture(
+                    f'/system backup save name="{name}" '
+                    f'password="{self._bcfg.password}" encryption=aes-sha256',
+                    timeout=save_timeout,
+                )
+            except TransportError as exc:
+                raise BackupError(f"backup save failed: {exc}") from exc
 
-        # 2. SFTP-pull the .backup file off the router.
-        pulled = False
-        try:
-            ssh.pull_file(on_device, local_path, timeout=pull_timeout)
-            pulled = True
-        except TransportError as exc:
-            raise BackupError(f"backup pull failed: {exc}") from exc
+            # 2. SFTP-pull the .backup file off the router.
+            try:
+                ssh.pull_file(on_device, local_path, timeout=pull_timeout)
+            except TransportError as exc:
+                raise BackupError(f"backup pull failed: {exc}") from exc
         finally:
-            # 3. Always try to clean up the on-device file, even on pull failure.
+            # 3. Always try to clean up the on-device file (after save- or pull-failure too).
             try:
                 ssh.capture(
                     f'/file remove [find name="{on_device}"]',
@@ -154,8 +156,6 @@ class BackupRunner:
                     device.name,
                     exc,
                 )
-
-        assert pulled  # pull failure raises above
 
         size = local_path.stat().st_size
         sha = _sha256(local_path)

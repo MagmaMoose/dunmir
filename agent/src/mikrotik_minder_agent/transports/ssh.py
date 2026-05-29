@@ -54,6 +54,17 @@ class SSHTransport:
         return self._device.username or self._defaults.ssh.username or "admin"
 
     @property
+    def known_hosts_path(self) -> str | None:
+        """Persistent known_hosts file for router host-key pinning.
+
+        When set, the transport verifies the router's SSH host key (TOFU): the
+        key is learned + persisted on first connect, and a *changed* key after
+        that is rejected — protecting the router password against MITM. When
+        unset, any host key is accepted with a warning (the homelab fallback).
+        """
+        return self._defaults.ssh.known_hosts_path
+
+    @property
     def _connect_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "hostname": self._device.address,
@@ -76,10 +87,19 @@ class SSHTransport:
         start = time.monotonic()
         client = self._open_session(paramiko)
         try:
-            identity = self._run_one(client, ":put [/system identity get name]", timeout=5)
+            # `/system resource print` is the liveness signal. Identity is
+            # best-effort: it can legitimately be blank, or a restricted account
+            # may emit a stderr-only warning — neither means the device is down.
             version_text = self._run_one(client, "/system resource print", timeout=5)
             version = self._parse_version(version_text)
-        except paramiko.SSHException as exc:
+            try:
+                identity = self._run_one(client, ":put [/system identity get name]", timeout=5)
+            except (paramiko.SSHException, OSError, TransportError) as exc:
+                log.debug("device %s: identity probe non-fatal: %s", self._device.name, exc)
+                identity = None
+        except (paramiko.SSHException, OSError) as exc:
+            # OSError covers socket.timeout (a read that outran the channel
+            # timeout) — without it a timeout would escape as a raw OSError.
             raise TransportError(f"SSH probe command failed: {exc}") from exc
         finally:
             client.close()
@@ -105,7 +125,10 @@ class SSHTransport:
             if err and not out.strip():
                 raise TransportError(f"SSH command produced stderr only: {err}")
             return out
-        except paramiko.SSHException as exc:
+        except (paramiko.SSHException, OSError) as exc:
+            # OSError covers socket.timeout from stdout.read() on a slow command
+            # (e.g. /export, backup save) — must become a TransportError, not an
+            # uncaught OSError that would kill the calling device thread.
             raise TransportError(f"SSH command failed: {exc}") from exc
         finally:
             client.close()
@@ -140,11 +163,33 @@ class SSHTransport:
 
     def _open_session(self, paramiko):
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(_WarnAcceptPolicy())  # type: ignore[arg-type]
+        kh = self.known_hosts_path
+        if kh:
+            # TOFU: load any pinned keys, learn a new host's key on first connect
+            # (AutoAddPolicy), and let paramiko reject a *changed* key — it raises
+            # BadHostKeyException before the missing-key policy is ever consulted.
+            path = Path(kh).expanduser()
+            if path.exists():
+                try:
+                    client.load_host_keys(str(path))
+                except OSError as exc:
+                    log.warning("could not load known_hosts %s: %s", path, exc)
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        else:
+            client.set_missing_host_key_policy(_WarnAcceptPolicy())  # type: ignore[arg-type]
         try:
             client.connect(**self._connect_kwargs)
         except (TimeoutError, paramiko.SSHException, OSError) as exc:
             raise TransportError(f"SSH connect failed: {exc}") from exc
+        if kh:
+            # Persist the (possibly newly-learned) host key so the next connect
+            # verifies against it. Best-effort: a read-only FS just means no
+            # pinning this run, same as the unset case.
+            try:
+                Path(kh).expanduser().parent.mkdir(parents=True, exist_ok=True)
+                client.save_host_keys(str(Path(kh).expanduser()))
+            except OSError as exc:
+                log.warning("could not persist known_hosts %s: %s", kh, exc)
         return client
 
     @staticmethod

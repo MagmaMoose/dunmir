@@ -64,6 +64,18 @@ def _config(
     )
 
 
+def test_cleanup_runs_even_when_save_fails(tmp_path: Path) -> None:
+    """A save that fails *after* RouterOS created the file must still trigger the
+    on-router `/file remove` cleanup, so artifacts don't accumulate on the device.
+    (Regression: pre-fix the save raised before the cleanup try/finally.)"""
+    cfg = _config(tmp_path)
+    runner = BackupRunner(cfg)
+    ch = FakeChannel(fail_save=True)
+    with pytest.raises(BackupError, match="save failed"):
+        runner.run(cfg.devices[0], channel=ch)
+    assert any(cmd.startswith("/file remove") for cmd, _ in ch.commands)
+
+
 def test_first_run_creates_file_and_reports_hash(tmp_path: Path) -> None:
     cfg = _config(tmp_path)
     runner = BackupRunner(cfg)

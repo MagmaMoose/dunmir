@@ -36,6 +36,7 @@ class APIDefaults:
 class SSHDefaults:
     port: int = 22
     username: str | None = None
+    known_hosts_path: str | None = None  # pin router host keys (TOFU) when set
 
 
 @dataclass(frozen=True)
@@ -194,9 +195,11 @@ def _parse_defaults(raw: dict[str, Any]) -> Defaults:
         use_tls=_strict_bool(api_raw.get("use_tls"), "defaults.api.use_tls", default=False),
         tls_port=int(api_raw.get("tls_port", 8729)),
     )
+    ssh_raw = raw.get("ssh", {}) or {}
     ssh = SSHDefaults(
-        port=int(raw.get("ssh", {}).get("port", 22)),
-        username=raw.get("ssh", {}).get("username"),
+        port=int(ssh_raw.get("port", 22)),
+        username=ssh_raw.get("username"),
+        known_hosts_path=ssh_raw.get("known_hosts_path"),
     )
     export_interval = raw.get("export_interval_seconds")
     update_check_interval = raw.get("update_check_interval_seconds")
