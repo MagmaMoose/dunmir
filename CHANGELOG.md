@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.7.0 (2026-05-31)
+
+### Features
+
+- **agent**: Report device address + identity in inventory_sync
+  ([#32](https://github.com/MagmaMoose/mikrotik-minder/pull/32),
+  [`1ccc353`](https://github.com/MagmaMoose/mikrotik-minder/commit/1ccc353bb30ca55154107c56dd81d9b577340615))
+
+
 ## v1.6.0 (2026-05-31)
 
 ### Build System
