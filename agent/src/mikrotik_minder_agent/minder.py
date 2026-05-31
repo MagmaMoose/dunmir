@@ -98,6 +98,14 @@ class MinderClient:
         data = self._post_json("/v1/ingest/jobs", body)
         return str(data.get("job_id", ""))
 
+    def fetch_config(self) -> dict[str, Any]:
+        """GET the agent's device config (used by ``config_source: remote``).
+
+        Old workers without the endpoint return 404 → ``MinderError(status_code=404)``,
+        which the caller treats as "fall back to local devices".
+        """
+        return self._get_json("/v1/ingest/config")
+
     def get_commands(self) -> list[CommandRef]:
         """Claim queued commands for this agent. Empty list = nothing to do.
 

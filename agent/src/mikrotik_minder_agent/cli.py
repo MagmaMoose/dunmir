@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import replace
 
 import click
 
 from .apply import ApplyAborted, ApplyError, ApplyResult, apply_summary, apply_update
 from .backup import BackupError, BackupRunner, backup_summary
-from .config import ConfigError, load_config
+from .config import AgentConfig, ConfigError, load_config
 from .daemon import Daemon
 from .export import ExportError, ExportRunner
 from .minder import JobReport, MinderClient, MinderError
+from .remoteconfig import build_devices
 from .transports import TransportError, build_transports
 from .updates import UpdateCheckError, run_update_check, update_summary
 
@@ -41,6 +43,7 @@ def run(config_path: str, once: bool, dry_run: bool, verbose: int) -> None:
     """Run the daemon (or one pass with --once)."""
     _configure_logging(verbose)
     config = _load(config_path)
+    config = _apply_remote_config(config)
     daemon = Daemon(config, dry_run=dry_run)
     if once:
         failures = daemon.run_once()
@@ -49,6 +52,31 @@ def run(config_path: str, once: bool, dry_run: bool, verbose: int) -> None:
             sys.exit(1)
         return
     daemon.run()
+
+
+def _apply_remote_config(config: AgentConfig) -> AgentConfig:
+    """In ``config_source: remote``, replace the device list with the control
+    plane's (GET /v1/ingest/config). Falls back to any local devices if the
+    startup fetch fails; exits if there's nothing to fall back to."""
+    if config.config_source != "remote":
+        return config
+    try:
+        with MinderClient(config.server) as client:
+            doc = client.fetch_config()
+    except MinderError as exc:
+        if config.devices:
+            log.warning(
+                "remote config fetch failed (%s); using %d local fallback device(s)",
+                exc,
+                len(config.devices),
+            )
+            return config
+        raise SystemExit(
+            f"remote config fetch failed and no local fallback devices: {exc}",
+        ) from exc
+    devices = build_devices(doc)
+    log.info("loaded %d device(s) from the control plane", len(devices))
+    return replace(config, devices=devices)
 
 
 @main.command()

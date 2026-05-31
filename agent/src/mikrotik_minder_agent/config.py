@@ -120,6 +120,7 @@ class AgentConfig:
     devices: tuple[DeviceConfig, ...]
     git: GitConfig | None = None
     backup: BackupConfig | None = None
+    config_source: str = "local"  # 'local' | 'remote' (fetch device list from control plane)
 
 
 # --- Loader --------------------------------------------------------------------------------------
@@ -151,10 +152,22 @@ def parse_config(raw: dict[str, Any], *, require_server_token: bool = True) -> A
     defaults = _parse_defaults(raw.get("defaults") or {})
     git = _parse_git(raw.get("git") or {})
     backup = _parse_backup(raw.get("backup") or {})
+    config_source = raw.get("config_source", "local")
+    if config_source not in ("local", "remote"):
+        raise ConfigError("config_source must be 'local' or 'remote'")
     devices_raw = raw.get("devices")
-    if not isinstance(devices_raw, list) or not devices_raw:
-        raise ConfigError("config must contain a non-empty 'devices' list")
-    devices = tuple(_parse_device(d, idx) for idx, d in enumerate(devices_raw))
+    if config_source == "local":
+        if not isinstance(devices_raw, list) or not devices_raw:
+            raise ConfigError("config must contain a non-empty 'devices' list")
+        devices = tuple(_parse_device(d, idx) for idx, d in enumerate(devices_raw))
+    else:
+        # remote: the device list comes from the control plane (GET /v1/ingest/config);
+        # any local devices are an optional fallback for a failed startup fetch.
+        devices = (
+            tuple(_parse_device(d, idx) for idx, d in enumerate(devices_raw))
+            if isinstance(devices_raw, list)
+            else ()
+        )
     _check_unique_names(devices)
     if defaults.export_interval_seconds and not git:
         raise ConfigError(
@@ -165,7 +178,12 @@ def parse_config(raw: dict[str, Any], *, require_server_token: bool = True) -> A
             "defaults.backup_interval_seconds requires a 'backup' section",
         )
     return AgentConfig(
-        server=server, defaults=defaults, devices=devices, git=git, backup=backup,
+        server=server,
+        defaults=defaults,
+        devices=devices,
+        git=git,
+        backup=backup,
+        config_source=config_source,
     )
 
 
