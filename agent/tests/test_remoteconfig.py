@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mikrotik_minder_agent.remoteconfig import build_devices
+from mikrotik_minder_agent.remoteconfig import build_devices, devices_changed
 
 
 def _doc(**overrides: Any) -> dict[str, Any]:
@@ -70,3 +70,33 @@ def test_build_devices_no_transport_falls_back_to_none() -> None:
 def test_build_devices_empty_or_absent() -> None:
     assert build_devices({"devices": []}) == ()
     assert build_devices({}) == ()
+
+
+def test_devices_changed_false_for_identical() -> None:
+    env = {"RTR01_PW": "x"}
+    assert devices_changed(build_devices(_doc(), env=env), build_devices(_doc(), env=env)) is False
+
+
+def test_devices_changed_detects_field_change() -> None:
+    env = {"RTR01_PW": "x"}
+    before = build_devices(_doc(), env=env)
+    after = build_devices(_doc(role="edge"), env=env)
+    assert devices_changed(before, after) is True
+
+
+def test_devices_changed_ignores_order() -> None:
+    env = {"PW": "x"}
+    cred = {"kind": "ref", "password_env": "PW"}
+    devs = [
+        {"name": "a", "address": "1.1.1.1", "credential": cred},
+        {"name": "b", "address": "2.2.2.2", "credential": cred},
+    ]
+    a = build_devices({"devices": devs}, env=env)
+    b = build_devices({"devices": list(reversed(devs))}, env=env)
+    assert devices_changed(a, b) is False
+
+
+def test_devices_changed_on_add_or_remove() -> None:
+    one = build_devices(_doc(), env={"RTR01_PW": "x"})
+    assert devices_changed(one, ()) is True
+    assert devices_changed((), one) is True

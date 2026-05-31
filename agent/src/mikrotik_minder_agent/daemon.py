@@ -29,6 +29,7 @@ from .export import ExportError, ExportResult, ExportRunner
 from .inventory import InventoryError, inventory_summary, run_inventory
 from .minder import CommandRef, JobReport, MinderClient, MinderError
 from .ping import PingError, run_ping
+from .remoteconfig import build_devices, devices_changed
 from .transports import ProbeResult, TransportError, build_transports
 from .updates import (
     UpdateCheckError,
@@ -115,6 +116,17 @@ class Daemon:
                     daemon=True,
                 ),
             )
+            # Remote-config agents re-fetch their device list periodically and
+            # restart to apply changes (see _config_refresh_loop).
+            if self._config.config_source == "remote":
+                threads.append(
+                    threading.Thread(
+                        target=self._config_refresh_loop,
+                        args=(minder,),
+                        name="config-refresh",
+                        daemon=True,
+                    ),
+                )
             for t in threads:
                 t.start()
             log.info(
@@ -129,6 +141,32 @@ class Daemon:
                 log.info("shutting down")
                 for t in threads:
                     t.join(timeout=5.0)
+
+    def _config_refresh_loop(self, minder: MinderClient) -> None:
+        """Remote mode: re-fetch the device config every
+        ``config_refresh_interval_seconds`` and, when it changes, trigger a
+        graceful shutdown so the process restarts and re-applies via the startup
+        path (an internal exit → the orchestrator restarts the pod; a SIGTERM
+        from the orchestrator stays down). A failed fetch is ignored — we keep
+        running on the last-known-good config rather than thrashing on a blip.
+        """
+        interval = self._config.defaults.config_refresh_interval_seconds
+        if self._config.config_source != "remote" or interval <= 0:
+            return
+        while not self._stop.wait(timeout=interval):
+            try:
+                fetched = build_devices(minder.fetch_config())
+            except MinderError as exc:
+                log.warning("config refresh failed (%s); keeping current devices", exc)
+                continue
+            if devices_changed(self._config.devices, fetched):
+                log.info(
+                    "control-plane config changed (%d -> %d device(s)) — restarting to apply",
+                    len(self._config.devices),
+                    len(fetched),
+                )
+                self._stop.set()
+                return
 
     def run_once(self) -> int:
         """One pass over devices + one command-poll. Returns the count of failed probes."""

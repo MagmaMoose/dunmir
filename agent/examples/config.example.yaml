@@ -17,6 +17,8 @@ server:
 #            locally (password_env / ssh_key_path); the plane only sends refs.
 #            In remote mode `devices:` is optional — a fallback if the fetch fails.
 # config_source: local
+# In remote mode the agent re-fetches its config on this interval; when the set
+# of devices changes it restarts to apply (defaults.config_refresh_interval_seconds, 300).
 
 defaults:
   transport:
