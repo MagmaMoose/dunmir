@@ -94,6 +94,31 @@ def test_duplicate_device_names_rejected() -> None:
         })
 
 
+def test_config_source_remote_allows_no_local_devices() -> None:
+    cfg = parse_config({
+        "server": {"url": "https://x", "agent_token": "t"},
+        "config_source": "remote",
+    })
+    assert cfg.config_source == "remote"
+    assert cfg.devices == ()
+
+
+def test_config_source_defaults_to_local() -> None:
+    cfg = parse_config({
+        "server": {"url": "https://x", "agent_token": "t"},
+        "devices": [{"name": "a", "address": "10.0.0.1", "username": "u", "password": "p"}],
+    })
+    assert cfg.config_source == "local"
+
+
+def test_config_source_invalid_rejected() -> None:
+    with pytest.raises(ConfigError, match="config_source"):
+        parse_config({
+            "server": {"url": "https://x", "agent_token": "t"},
+            "config_source": "bogus",
+        })
+
+
 def test_quoted_string_use_tls_is_rejected() -> None:
     """`bool('false')` is True. Strict-bool validation must catch quoted booleans."""
     with pytest.raises(ConfigError, match="use_tls must be a boolean"):

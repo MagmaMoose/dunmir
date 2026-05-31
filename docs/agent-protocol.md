@@ -158,6 +158,31 @@ This is only emitted by the explicit `mikrotik-minder-agent update apply DEVICE 
 - `status=failed`, `aborted_pre_install=true`: pre-check stopped us before issuing the install. Router untouched.
 - `status=failed`, `aborted_pre_install=false`: install was issued but the router did not return cleanly. Worker fires a critical `update_failed` alert.
 
+### `GET /v1/ingest/config`
+
+Used only when the agent runs `config_source: remote`. Returns the calling agent's devices that have a connection `address` set, so the UI can be the source of truth for the fleet. Credentials are returned as **references** — the agent resolves `password_env` / `ssh_key_path` from its own environment; the control plane never sends a secret.
+
+```json
+{
+  "version": 1,
+  "generated_at": 1717200000,
+  "devices": [
+    {
+      "name": "oci-rtr-01",
+      "address": "193.123.39.172",
+      "username": "minder",
+      "transport": { "primary": "api", "fallback": "ssh" },
+      "api_port": 8728, "use_tls": false, "ssh_port": 22,
+      "site": "oci", "role": "lab",
+      "heartbeat_interval_seconds": 300,
+      "credential": { "kind": "ref", "password_env": "OCI_RTR_01_PASSWORD" }
+    }
+  ]
+}
+```
+
+`credential.kind` is `"ref"` in the OSS worker. A licensed provider may instead return `"sealed"` (envelope-encrypted) credentials; agents skip any device whose credential they can't resolve. See `docs/rfc-control-plane-managed-config.md`.
+
 ## Cron sweep
 
 Every minute the worker scans devices with `last_seen_at + interval + grace < now` and `last_status != 'down'`. For each, it sets the device to `down` and emits a `heartbeat_missed` critical alert with `last_seen_seconds_ago` in the payload. This is the dead-man feature called out in the product README under *Watchdog heartbeat / dead-man alert*.

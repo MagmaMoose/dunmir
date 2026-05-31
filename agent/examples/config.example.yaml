@@ -10,6 +10,14 @@ server:
   agent_token_env: MTM_AGENT_TOKEN
   timeout_seconds: 10
 
+# Where the device list comes from:
+#   local  (default) — defined in the `devices:` section below.
+#   remote — fetched from the control plane (GET /v1/ingest/config) at startup,
+#            so the UI is the source of truth. Credentials are still resolved
+#            locally (password_env / ssh_key_path); the plane only sends refs.
+#            In remote mode `devices:` is optional — a fallback if the fetch fails.
+# config_source: local
+
 defaults:
   transport:
     primary: api       # 'api' | 'ssh'
