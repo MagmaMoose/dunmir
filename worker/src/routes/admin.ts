@@ -212,6 +212,26 @@ admin.delete("/devices/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// Set (or clear, with null) a device's sealed credential — a libsodium sealed-box
+// ciphertext the licensed UI produces by encrypting to the agent's public key.
+// The worker stores it opaquely; GET /v1/ingest/config then serves it as
+// credential.kind = "sealed". The plane never sees the plaintext or a key.
+admin.post("/devices/:id/sealed-credential", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const sealed = body?.sealed;
+  if (sealed !== null && sealed !== undefined && typeof sealed !== "string") {
+    return c.json({ error: "sealed must be a string (to set) or null (to clear)" }, 400);
+  }
+  if (typeof sealed === "string" && sealed.length > 10000) {
+    return c.json({ error: "sealed blob exceeds 10000 chars" }, 400);
+  }
+  const res = await c.env.DB.prepare("UPDATE devices SET credential_sealed = ?1 WHERE id = ?2")
+    .bind(sealed ?? null, c.req.param("id"))
+    .run();
+  if ((res.meta.changes ?? 0) === 0) return c.json({ error: "not found" }, 404);
+  return c.json({ ok: true });
+});
+
 // --- Alert routes ---------------------------------------------------------
 
 admin.post("/alert-routes", async (c) => {

@@ -491,6 +491,7 @@ interface DeviceConfigRow {
   tags: string | null;
   heartbeat_interval_seconds: number | null;
   grace_seconds: number | null;
+  credential_sealed: string | null;
 }
 
 ingest.get("/config", async (c) => {
@@ -498,7 +499,7 @@ ingest.get("/config", async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT name, address, username, password_env, ssh_key_path,
             transport_primary, transport_fallback, api_port, use_tls, ssh_port,
-            site, role, tags, heartbeat_interval_seconds, grace_seconds
+            site, role, tags, heartbeat_interval_seconds, grace_seconds, credential_sealed
        FROM devices
       WHERE agent_id = ?1 AND address IS NOT NULL
       ORDER BY name`,
@@ -532,16 +533,35 @@ ingest.get("/config", async (c) => {
       tags,
       heartbeat_interval_seconds: d.heartbeat_interval_seconds ?? undefined,
       grace_seconds: d.grace_seconds ?? undefined,
-      // OSS provider: credentials by reference. Pro emits { kind: "sealed", ... }.
-      credential: {
-        kind: "ref" as const,
-        password_env: d.password_env ?? undefined,
-        ssh_key_path: d.ssh_key_path ?? undefined,
-      },
+      // A sealed-box ciphertext (set by the licensed UI) takes precedence; the
+      // agent decrypts it locally. Otherwise OSS serves credential references.
+      // The worker treats `credential_sealed` as an opaque blob — it never holds
+      // a key or plaintext.
+      credential: d.credential_sealed
+        ? { kind: "sealed" as const, blob: d.credential_sealed }
+        : {
+            kind: "ref" as const,
+            password_env: d.password_env ?? undefined,
+            ssh_key_path: d.ssh_key_path ?? undefined,
+          },
     };
   });
 
   return c.json({ version: 1, generated_at: nowSeconds(), devices });
+});
+
+// The agent registers its Curve25519 public key (libsodium sealed-box) so the
+// licensed UI can encrypt credentials to it. The worker only stores it; it's a
+// public key, and the worker never holds the matching private key.
+ingest.post("/agent-key", async (c) => {
+  const agentId = c.get("agentId")!;
+  const body = await c.req.json().catch(() => null);
+  const publicKey = asString(body?.public_key, "public_key", { max: 200 });
+  if (!publicKey.ok) return c.json({ error: publicKey.error }, 400);
+  await c.env.DB.prepare("UPDATE agents SET public_key = ?1 WHERE id = ?2")
+    .bind(publicKey.value, agentId)
+    .run();
+  return c.json({ ok: true });
 });
 
 export default ingest;
