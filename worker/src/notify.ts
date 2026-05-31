@@ -1,4 +1,4 @@
-import type { Env } from "./env";
+import { DEFAULT_TENANT_ID, type Env } from "./env";
 import { newId, nowSeconds } from "./ids";
 import { meetsSeverity, type AlertKind, type RouteKind, type Severity } from "./schema";
 
@@ -10,6 +10,9 @@ export interface AlertInput {
   agent_id?: string;
   device_id?: string;
   job_id?: string;
+  // The tenant this alert belongs to. If omitted, it's resolved from agent_id
+  // (else the default tenant). Determines which alert routes receive it.
+  tenant_id?: string;
 }
 
 export interface StoredAlert extends AlertInput {
@@ -63,9 +66,10 @@ export async function fireAlert(
 ): Promise<string> {
   const id = newId("alert");
   const created = nowSeconds();
+  const tenantId = input.tenant_id ?? (await resolveAlertTenant(env, input.agent_id));
   await env.DB.prepare(
-    `INSERT INTO alerts (id, severity, kind, agent_id, device_id, job_id, title, payload, created_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+    `INSERT INTO alerts (id, severity, kind, agent_id, device_id, job_id, title, payload, created_at, tenant_id)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
   )
     .bind(
       id,
@@ -77,10 +81,11 @@ export async function fireAlert(
       input.title,
       JSON.stringify(input.payload),
       created,
+      tenantId,
     )
     .run();
 
-  const stored: StoredAlert = { ...input, id, created_at: created };
+  const stored: StoredAlert = { ...input, id, created_at: created, tenant_id: tenantId };
   const dispatch = deliverAlert(env, stored);
   if (ctx) ctx.waitUntil(dispatch);
   else await dispatch;
@@ -136,10 +141,24 @@ async function deliverToSlackBot(env: Env, alert: StoredAlert): Promise<void> {
   }
 }
 
+// An alert belongs to its agent's tenant (or the default tenant when there's no
+// agent, e.g. a manual test). Routing is then confined to that tenant's routes.
+async function resolveAlertTenant(env: Env, agentId?: string): Promise<string> {
+  if (agentId) {
+    const row = await env.DB.prepare("SELECT tenant_id FROM agents WHERE id = ?1")
+      .bind(agentId)
+      .first<{ tenant_id: string | null }>();
+    if (row?.tenant_id) return row.tenant_id;
+  }
+  return DEFAULT_TENANT_ID;
+}
+
 async function pickRoutes(env: Env, alert: StoredAlert): Promise<RouteRow[]> {
   const { results } = await env.DB.prepare(
-    "SELECT id, name, kind, url, events, min_severity, enabled FROM alert_routes WHERE enabled = 1",
-  ).all<RouteRow>();
+    "SELECT id, name, kind, url, events, min_severity, enabled FROM alert_routes WHERE enabled = 1 AND tenant_id = ?1",
+  )
+    .bind(alert.tenant_id ?? DEFAULT_TENANT_ID)
+    .all<RouteRow>();
   return results.filter((r) => {
     if (!meetsSeverity(alert.severity, r.min_severity)) return false;
     if (r.events) {
