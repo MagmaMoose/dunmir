@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.10.0 (2026-05-31)
+
+### Features
+
+- **worker**: Device display label (migration 0005 + admin upsert)
+  ([#35](https://github.com/MagmaMoose/mikrotik-minder/pull/35),
+  [`c7cacd3`](https://github.com/MagmaMoose/mikrotik-minder/commit/c7cacd3fbd243ef5e7cb13c29dfa4496e360c03b))
+
+
 ## v1.9.0 (2026-05-31)
 
 ### Features
