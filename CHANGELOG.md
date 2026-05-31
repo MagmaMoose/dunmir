@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.9.0 (2026-05-31)
+
+### Features
+
+- **agent**: Config_source: remote — fetch device config from control plane
+  ([#34](https://github.com/MagmaMoose/mikrotik-minder/pull/34),
+  [`ecd6d6f`](https://github.com/MagmaMoose/mikrotik-minder/commit/ecd6d6f272fbc322303311aaf67a8e6a94f3591a))
+
+
 ## v1.8.0 (2026-05-31)
 
 ### Documentation
