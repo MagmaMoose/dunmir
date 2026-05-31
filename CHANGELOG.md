@@ -2,6 +2,21 @@
 
 <!-- version list -->
 
+## v1.8.0 (2026-05-31)
+
+### Documentation
+
+- RFC for control-plane-managed device config (open-core)
+  ([#31](https://github.com/MagmaMoose/mikrotik-minder/pull/31),
+  [`0b6318e`](https://github.com/MagmaMoose/mikrotik-minder/commit/0b6318e59e755e52d355de4154767fe99551877f))
+
+### Features
+
+- **worker**: Device connection fields + GET /v1/ingest/config (RFC phase 1)
+  ([#33](https://github.com/MagmaMoose/mikrotik-minder/pull/33),
+  [`00756f3`](https://github.com/MagmaMoose/mikrotik-minder/commit/00756f37b44cadf12feda174889686ff644d08d6))
+
+
 ## v1.7.0 (2026-05-31)
 
 ### Features
