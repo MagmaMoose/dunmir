@@ -44,6 +44,11 @@ config:
     export_interval_seconds: 3600
     update_check_interval_seconds: 21600
     backup_interval_seconds: 86400
+    inventory_check_interval_seconds: 3600   # CHR / licence / cloud facts (read-only); 0 or null disables
+    # Packet-loss probe: router pings this each heartbeat → loss % + avg RTT on the health trend.
+    # Uncomment to enable fleet-wide (or set per-device via config.devices[].ping_target).
+    # ping_target: 1.1.1.1
+    # ping_count: 5
     connect_timeout_seconds: 5.0
   git:
     repo: /var/lib/mikrotik-minder/configs
