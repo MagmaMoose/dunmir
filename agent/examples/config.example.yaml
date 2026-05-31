@@ -19,6 +19,9 @@ server:
 # config_source: local
 # In remote mode the agent re-fetches its config on this interval; when the set
 # of devices changes it restarts to apply (defaults.config_refresh_interval_seconds, 300).
+# For sealed (vault) credentials, point this at a persistent file; the agent keeps
+# its Curve25519 key there and registers the public half with the control plane.
+# agent_key_path: /var/lib/mikrotik-minder/agent_key
 
 defaults:
   transport:

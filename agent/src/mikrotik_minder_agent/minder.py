@@ -106,6 +106,12 @@ class MinderClient:
         """
         return self._get_json("/v1/ingest/config")
 
+    def register_public_key(self, public_key: str) -> None:
+        """Register the agent's Curve25519 public key (Pro vault) so the licensed
+        UI can seal credentials to it. Best-effort: old workers without the
+        endpoint return 404, which the caller can ignore."""
+        self._post_json("/v1/ingest/agent-key", {"public_key": public_key})
+
     def get_commands(self) -> list[CommandRef]:
         """Claim queued commands for this agent. Empty list = nothing to do.
 

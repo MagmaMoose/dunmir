@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 
 import click
 
+from .agentkeys import AgentKeyError, load_or_create_keypair, make_unsealer
 from .apply import ApplyAborted, ApplyError, ApplyResult, apply_summary, apply_update
 from .backup import BackupError, BackupRunner, backup_summary
 from .config import AgentConfig, ConfigError, load_config
@@ -43,8 +45,11 @@ def run(config_path: str, once: bool, dry_run: bool, verbose: int) -> None:
     """Run the daemon (or one pass with --once)."""
     _configure_logging(verbose)
     config = _load(config_path)
-    config = _apply_remote_config(config)
-    daemon = Daemon(config, dry_run=dry_run)
+    unseal, public_key = _vault_unsealer(config)
+    if public_key and config.config_source == "remote":
+        _register_agent_key(config, public_key)
+    config = _apply_remote_config(config, unseal)
+    daemon = Daemon(config, dry_run=dry_run, unseal=unseal)
     if once:
         failures = daemon.run_once()
         if failures:
@@ -54,7 +59,32 @@ def run(config_path: str, once: bool, dry_run: bool, verbose: int) -> None:
     daemon.run()
 
 
-def _apply_remote_config(config: AgentConfig) -> AgentConfig:
+def _vault_unsealer(config: AgentConfig) -> tuple[Callable[[str], str] | None, str | None]:
+    """Load the agent's vault keypair if ``agent_key_path`` is set; return
+    (unseal, base64 public key). Exits if a configured key can't be loaded."""
+    if not config.agent_key_path:
+        return None, None
+    try:
+        private_key, public_key = load_or_create_keypair(config.agent_key_path)
+    except AgentKeyError as exc:
+        raise SystemExit(f"agent vault key error: {exc}") from exc
+    return make_unsealer(private_key), public_key
+
+
+def _register_agent_key(config: AgentConfig, public_key: str) -> None:
+    """Best-effort registration of the agent's public key so the licensed UI can
+    seal credentials to it. A failure (incl. old workers → 404) is non-fatal."""
+    try:
+        with MinderClient(config.server) as client:
+            client.register_public_key(public_key)
+    except MinderError as exc:
+        log.warning("could not register agent public key (%s); sealed creds may be stale", exc)
+
+
+def _apply_remote_config(
+    config: AgentConfig,
+    unseal: Callable[[str], str] | None = None,
+) -> AgentConfig:
     """In ``config_source: remote``, replace the device list with the control
     plane's (GET /v1/ingest/config). Falls back to any local devices if the
     startup fetch fails; exits if there's nothing to fall back to."""
@@ -74,7 +104,7 @@ def _apply_remote_config(config: AgentConfig) -> AgentConfig:
         raise SystemExit(
             f"remote config fetch failed and no local fallback devices: {exc}",
         ) from exc
-    devices = build_devices(doc)
+    devices = build_devices(doc, unseal=unseal)
     log.info("loaded %d device(s) from the control plane", len(devices))
     return replace(config, devices=devices)
 
