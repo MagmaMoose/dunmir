@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.11.0 (2026-05-31)
+
+### Features
+
+- **agent**: Periodic remote-config refresh
+  ([#36](https://github.com/MagmaMoose/mikrotik-minder/pull/36),
+  [`e2f5a97`](https://github.com/MagmaMoose/mikrotik-minder/commit/e2f5a97c69c2e3a298b47aa141728b40e5b00cf7))
+
+
 ## v1.10.0 (2026-05-31)
 
 ### Features
