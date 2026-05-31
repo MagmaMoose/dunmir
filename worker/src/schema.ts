@@ -47,6 +47,25 @@ export function asStringArray(v: unknown, field: string): ValidationResult<strin
   return { ok: true, value: v as string[] };
 }
 
+export function asOptionalEnum<T extends string>(
+  v: unknown,
+  field: string,
+  values: readonly T[],
+): ValidationResult<T | undefined> {
+  if (v === undefined || v === null || v === "") return { ok: true, value: undefined };
+  return asEnum(v, field, values);
+}
+
+export function asOptionalBool(v: unknown, field: string): ValidationResult<boolean | undefined> {
+  if (v === undefined || v === null) return { ok: true, value: undefined };
+  if (typeof v !== "boolean") return { ok: false, error: `${field} must be a boolean` };
+  return { ok: true, value: v };
+}
+
+// Device connection transports (control-plane-managed config).
+export const TRANSPORTS = ["api", "ssh"] as const;
+export type Transport = (typeof TRANSPORTS)[number];
+
 export const JOB_KINDS = [
   "backup",
   "export",

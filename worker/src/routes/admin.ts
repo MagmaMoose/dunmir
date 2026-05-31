@@ -6,6 +6,8 @@ import {
   ALERT_KINDS,
   asEnum,
   asInt,
+  asOptionalBool,
+  asOptionalEnum,
   asOptionalInt,
   asOptionalString,
   asString,
@@ -13,6 +15,7 @@ import {
   COMMAND_KINDS,
   ROUTE_KINDS,
   SEVERITIES,
+  TRANSPORTS,
   type AlertKind,
   type Severity,
 } from "../schema";
@@ -92,6 +95,28 @@ admin.post("/devices", async (c) => {
   const grace = asOptionalInt(body?.grace_seconds, "grace_seconds", { min: 0, max: 86400 });
   if (!grace.ok) return c.json({ error: grace.error }, 400);
 
+  // Connection details (control-plane-managed config). All optional; credentials
+  // are stored only as references (env-var name / key path), never as secrets.
+  const address = asOptionalString(body?.address, "address", { max: 255 });
+  if (!address.ok) return c.json({ error: address.error }, 400);
+  const username = asOptionalString(body?.username, "username", { max: 100 });
+  if (!username.ok) return c.json({ error: username.error }, 400);
+  const passwordEnv = asOptionalString(body?.password_env, "password_env", { max: 100 });
+  if (!passwordEnv.ok) return c.json({ error: passwordEnv.error }, 400);
+  const sshKeyPath = asOptionalString(body?.ssh_key_path, "ssh_key_path", { max: 255 });
+  if (!sshKeyPath.ok) return c.json({ error: sshKeyPath.error }, 400);
+  const tPrimary = asOptionalEnum(body?.transport_primary, "transport_primary", TRANSPORTS);
+  if (!tPrimary.ok) return c.json({ error: tPrimary.error }, 400);
+  const tFallback = asOptionalEnum(body?.transport_fallback, "transport_fallback", TRANSPORTS);
+  if (!tFallback.ok) return c.json({ error: tFallback.error }, 400);
+  const apiPort = asOptionalInt(body?.api_port, "api_port", { min: 1, max: 65535 });
+  if (!apiPort.ok) return c.json({ error: apiPort.error }, 400);
+  const sshPort = asOptionalInt(body?.ssh_port, "ssh_port", { min: 1, max: 65535 });
+  if (!sshPort.ok) return c.json({ error: sshPort.error }, 400);
+  const useTls = asOptionalBool(body?.use_tls, "use_tls");
+  if (!useTls.ok) return c.json({ error: useTls.error }, 400);
+  const useTlsInt = useTls.value === undefined ? null : useTls.value ? 1 : 0;
+
   const agent = await c.env.DB.prepare("SELECT id FROM agents WHERE id = ?1 AND disabled = 0")
     .bind(agentId.value)
     .first();
@@ -110,16 +135,37 @@ admin.post("/devices", async (c) => {
   if (existing) {
     await c.env.DB.prepare(
       `UPDATE devices SET site = ?1, role = ?2, tags = ?3,
-       heartbeat_interval_seconds = ?4, grace_seconds = ?5
-       WHERE id = ?6`,
+       heartbeat_interval_seconds = ?4, grace_seconds = ?5,
+       address = ?6, username = ?7, password_env = ?8, ssh_key_path = ?9,
+       transport_primary = ?10, transport_fallback = ?11,
+       api_port = ?12, use_tls = ?13, ssh_port = ?14
+       WHERE id = ?15`,
     )
-      .bind(site.value ?? null, role.value ?? null, tagsJson, interval.value ?? null, grace.value ?? null, id)
+      .bind(
+        site.value ?? null,
+        role.value ?? null,
+        tagsJson,
+        interval.value ?? null,
+        grace.value ?? null,
+        address.value ?? null,
+        username.value ?? null,
+        passwordEnv.value ?? null,
+        sshKeyPath.value ?? null,
+        tPrimary.value ?? null,
+        tFallback.value ?? null,
+        apiPort.value ?? null,
+        useTlsInt,
+        sshPort.value ?? null,
+        id,
+      )
       .run();
   } else {
     await c.env.DB.prepare(
       `INSERT INTO devices
-       (id, agent_id, name, site, role, tags, heartbeat_interval_seconds, grace_seconds, last_status, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'unknown', ?9)`,
+       (id, agent_id, name, site, role, tags, heartbeat_interval_seconds, grace_seconds,
+        address, username, password_env, ssh_key_path, transport_primary, transport_fallback,
+        api_port, use_tls, ssh_port, last_status, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 'unknown', ?18)`,
     )
       .bind(
         id,
@@ -130,6 +176,15 @@ admin.post("/devices", async (c) => {
         tagsJson,
         interval.value ?? null,
         grace.value ?? null,
+        address.value ?? null,
+        username.value ?? null,
+        passwordEnv.value ?? null,
+        sshKeyPath.value ?? null,
+        tPrimary.value ?? null,
+        tFallback.value ?? null,
+        apiPort.value ?? null,
+        useTlsInt,
+        sshPort.value ?? null,
         now,
       )
       .run();
