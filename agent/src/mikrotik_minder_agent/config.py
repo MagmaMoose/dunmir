@@ -79,11 +79,14 @@ class Defaults:
     export_interval_seconds: int | None = None        # None = exports disabled
     update_check_interval_seconds: int | None = None  # None = update checks disabled
     backup_interval_seconds: int | None = None        # None = backups disabled
+    inventory_check_interval_seconds: int | None = 3600  # CHR/licence/cloud facts; None/0 = off
     connect_timeout_seconds: float = 5.0
     export_timeout_seconds: float = 30.0
     update_check_timeout_seconds: float = 30.0
     backup_save_timeout_seconds: float = 120.0
     backup_pull_timeout_seconds: float = 300.0
+    ping_target: str | None = None  # router pings this address; None = packet-loss probe off
+    ping_count: int = 5
     api: APIDefaults = field(default_factory=APIDefaults)
     ssh: SSHDefaults = field(default_factory=SSHDefaults)
 
@@ -102,6 +105,8 @@ class DeviceConfig:
     export_interval_seconds: int | None = None
     update_check_interval_seconds: int | None = None
     backup_interval_seconds: int | None = None
+    inventory_check_interval_seconds: int | None = None
+    ping_target: str | None = None
     transport: TransportPolicy | None = None
     api_port: int | None = None
     use_tls: bool | None = None
@@ -204,17 +209,28 @@ def _parse_defaults(raw: dict[str, Any]) -> Defaults:
     export_interval = raw.get("export_interval_seconds")
     update_check_interval = raw.get("update_check_interval_seconds")
     backup_interval = raw.get("backup_interval_seconds")
+    # Inventory defaults ON (hourly) — it's cheap, read-only facts. Explicit 0/null disables it.
+    inventory_interval = raw.get("inventory_check_interval_seconds", 3600)
+    ping_target_raw = raw.get("ping_target")
+    ping_target = (
+        ping_target_raw.strip()
+        if isinstance(ping_target_raw, str) and ping_target_raw.strip()
+        else None
+    )
     return Defaults(
         transport=transport,
         heartbeat_interval_seconds=int(raw.get("heartbeat_interval_seconds", 300)),
         export_interval_seconds=int(export_interval) if export_interval else None,
         update_check_interval_seconds=int(update_check_interval) if update_check_interval else None,
         backup_interval_seconds=int(backup_interval) if backup_interval else None,
+        inventory_check_interval_seconds=int(inventory_interval) if inventory_interval else None,
         connect_timeout_seconds=float(raw.get("connect_timeout_seconds", 5.0)),
         export_timeout_seconds=float(raw.get("export_timeout_seconds", 30.0)),
         update_check_timeout_seconds=float(raw.get("update_check_timeout_seconds", 30.0)),
         backup_save_timeout_seconds=float(raw.get("backup_save_timeout_seconds", 120.0)),
         backup_pull_timeout_seconds=float(raw.get("backup_pull_timeout_seconds", 300.0)),
+        ping_target=ping_target,
+        ping_count=int(raw.get("ping_count", 5)),
         api=api,
         ssh=ssh,
     )
@@ -324,6 +340,8 @@ def _parse_device(raw: Any, idx: int) -> DeviceConfig:
         export_interval_seconds=raw.get("export_interval_seconds"),
         update_check_interval_seconds=raw.get("update_check_interval_seconds"),
         backup_interval_seconds=raw.get("backup_interval_seconds"),
+        inventory_check_interval_seconds=raw.get("inventory_check_interval_seconds"),
+        ping_target=raw.get("ping_target"),
         transport=transport,
         api_port=raw.get("api_port"),
         use_tls=_strict_bool(raw.get("use_tls"), f"devices[{idx}].use_tls"),
@@ -416,6 +434,16 @@ def update_check_interval(device: DeviceConfig, defaults: Defaults) -> int | Non
 def backup_interval(device: DeviceConfig, defaults: Defaults) -> int | None:
     """Resolve the device's backup interval, or None if disabled."""
     return device.backup_interval_seconds or defaults.backup_interval_seconds
+
+
+def inventory_check_interval(device: DeviceConfig, defaults: Defaults) -> int | None:
+    """Resolve the device's inventory interval, or None if disabled."""
+    return device.inventory_check_interval_seconds or defaults.inventory_check_interval_seconds
+
+
+def ping_target(device: DeviceConfig, defaults: Defaults) -> str | None:
+    """Resolve the device's packet-loss ping target, or None if the probe is off."""
+    return device.ping_target or defaults.ping_target
 
 
 def effective_transport(device: DeviceConfig, defaults: Defaults) -> TransportPolicy:

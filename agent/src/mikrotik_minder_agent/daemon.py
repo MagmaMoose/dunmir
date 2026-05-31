@@ -21,10 +21,14 @@ from .config import (
     backup_interval,
     export_interval,
     heartbeat_interval,
+    inventory_check_interval,
+    ping_target,
     update_check_interval,
 )
 from .export import ExportError, ExportResult, ExportRunner
+from .inventory import InventoryError, inventory_summary, run_inventory
 from .minder import CommandRef, JobReport, MinderClient, MinderError
+from .ping import PingError, run_ping
 from .transports import ProbeResult, TransportError, build_transports
 from .updates import (
     UpdateCheckError,
@@ -52,6 +56,7 @@ class DeviceState:
     last_export: float = 0.0
     last_update_check: float = 0.0
     last_backup: float = 0.0
+    last_inventory: float = 0.0
     consecutive_failures: int = 0
     startup_offset: float = 0.0  # seconds to delay this device's first tick (anti-stampede)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -283,6 +288,23 @@ class Daemon:
         finished = int(time.time())
         ok = result is not None
         status_label = "ok" if ok else "down"
+
+        # Optional packet-loss probe (router → ping_target), folded into the same
+        # health_check report. Off unless a ping_target is configured, so we never
+        # generate surprise egress from the fleet.
+        packet_loss_pct: float | None = None
+        avg_rtt_ms: float | None = None
+        target = ping_target(device, self._config.defaults)
+        if ok and not self._dry_run and target:
+            try:
+                ping = run_ping(
+                    device, self._config.defaults, target, self._config.defaults.ping_count,
+                )
+                packet_loss_pct = ping.packet_loss_pct
+                avg_rtt_ms = ping.avg_rtt_ms
+            except (PingError, TransportError) as exc:
+                log.warning("device %s ping probe failed: %s", device.name, exc)
+
         probe_ok = self._report(
             device,
             minder,
@@ -293,6 +315,8 @@ class Daemon:
             error=error,
             started=started,
             finished=finished,
+            packet_loss_pct=packet_loss_pct,
+            avg_rtt_ms=avg_rtt_ms,
         )
 
         # Only attempt heavier jobs when the device responded — no point hammering a down router.
@@ -301,6 +325,8 @@ class Daemon:
                 self._run_export(device, minder)
             if self._update_check_due(device, finished):
                 self._run_update_check(device, minder)
+            if self._inventory_due(device, finished):
+                self._run_inventory(device, minder)
             if self._backup_due(device, finished):
                 self._run_backup(device, minder)
 
@@ -318,6 +344,8 @@ class Daemon:
         error: str | None,
         started: int,
         finished: int,
+        packet_loss_pct: float | None = None,
+        avg_rtt_ms: float | None = None,
     ) -> bool:
         state = self._state[device.name]
         with state.lock:
@@ -342,6 +370,10 @@ class Daemon:
             details["identity"] = result.identity
             details["version"] = result.version
             details["latency_ms"] = result.latency_ms
+        if packet_loss_pct is not None:
+            details["packet_loss_pct"] = packet_loss_pct
+        if avg_rtt_ms is not None:
+            details["avg_rtt_ms"] = avg_rtt_ms
         if error:
             details["error"] = error[:300]
 
@@ -534,6 +566,58 @@ class Daemon:
             )
         except MinderError as exc:
             log.error("device %s firmware_align send failed: %s", device.name, exc)
+
+    # --- Inventory ---
+
+    def _inventory_due(self, device: DeviceConfig, now: float) -> bool:
+        interval = inventory_check_interval(device, self._config.defaults)
+        if not interval:
+            return False
+        state = self._state[device.name]
+        with state.lock:
+            last = state.last_inventory
+        return last == 0.0 or now - last >= interval
+
+    def _run_inventory(self, device: DeviceConfig, minder: MinderClient) -> None:
+        try:
+            result = run_inventory(device, self._config.defaults)
+        except InventoryError as exc:
+            # Best-effort metadata — and it's SSH-only, so an API-only device would
+            # fail this every hour. Log and skip rather than firing a job_failed
+            # alert; the health_check already covers genuine unreachability.
+            log.warning("device %s inventory skipped: %s", device.name, exc)
+            return
+
+        state = self._state[device.name]
+        with state.lock:
+            state.last_inventory = float(result.finished_at)
+
+        details: dict[str, object] = {
+            "has_routerboard": result.has_routerboard,
+            "is_chr": not result.has_routerboard,
+            "model": result.model,
+            "license_level": result.license.level,
+            "license_software_id": result.license.software_id,
+            "license_deadline": result.license.deadline,
+            "cloud_dns_name": result.cloud.dns_name,
+            "cloud_public_address": result.cloud.public_address,
+            "cloud_status": result.cloud.status,
+            "ddns_enabled": result.cloud.ddns_enabled,
+        }
+        try:
+            minder.send_job(
+                JobReport(
+                    device=device.name,
+                    kind="inventory_sync",
+                    status="success",
+                    started_at=result.started_at,
+                    finished_at=result.finished_at,
+                    summary=inventory_summary(result),
+                    details=details,
+                ),
+            )
+        except MinderError as exc:
+            log.error("device %s inventory send failed: %s", device.name, exc)
 
     def _send_failure_job(
         self,

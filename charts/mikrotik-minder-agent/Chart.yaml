@@ -7,8 +7,8 @@ description: |
   encrypted backups via SFTP, and reports heartbeats and job results to the
   Mikrotik Minder control plane.
 type: application
-version: 0.1.4
-appVersion: "0.0.3"
+version: 0.2.0
+appVersion: "0.1.0"
 home: https://github.com/magmamoose/mikrotik-minder
 sources:
   - https://github.com/magmamoose/mikrotik-minder
@@ -24,5 +24,6 @@ icon: https://avatars.githubusercontent.com/magmamoose
 annotations:
   # The agent must run as a single instance — see values.yaml comments.
   artifacthub.io/changes: |
-    - Agent: stream encrypted backups to the control plane's R2 bucket so the Pro UI can list and download them
+    - Agent: periodic inventory_sync probe — reports CHR vs RouterBOARD, licence level, and /ip cloud name
+    - Agent: optional packet-loss / RTT ping probe feeding the health trend (set defaults.ping_target to enable)
   artifacthub.io/license: Apache-2.0

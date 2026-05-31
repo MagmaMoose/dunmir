@@ -17,6 +17,13 @@ defaults:
   heartbeat_interval_seconds: 300
   # Set to enable scheduled `/export` capture. Omit to disable exports.
   export_interval_seconds: 3600
+  # Device facts (CHR vs RouterBOARD, licence level, /ip cloud name). On by
+  # default at hourly; set to 0 or null to disable. Read-only, over SSH.
+  inventory_check_interval_seconds: 3600
+  # Optional packet-loss probe: the router pings this address each heartbeat and
+  # reports loss % + avg RTT for the health trend. Omit to leave the probe off.
+  # ping_target: 1.1.1.1
+  # ping_count: 5
   connect_timeout_seconds: 5.0
   export_timeout_seconds: 30.0
   api:
