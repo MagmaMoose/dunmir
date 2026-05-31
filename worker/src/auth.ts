@@ -1,5 +1,5 @@
 import type { Context, Next } from "hono";
-import type { AppContext } from "./env";
+import { type AppContext, DEFAULT_TENANT_ID } from "./env";
 
 const TOKEN_PREFIX = "mtm_";
 
@@ -44,8 +44,31 @@ export function requireAdmin() {
       return c.json({ error: "unauthorized" }, 401);
     }
     c.set("isAdmin", true);
+    const tenantId = await resolveTenant(c);
+    if (!tenantId) {
+      return c.json({ error: "no tenant for this operator" }, 403);
+    }
+    c.set("tenantId", tenantId);
     await next();
   };
+}
+
+/**
+ * Resolve the tenant an admin request acts on. Single-tenant (the default) →
+ * always the default tenant. Multi-tenant → the tenant the authenticated
+ * operator email (X-Auth-Email, set by Cloudflare Access) is a member of;
+ * an email with no membership gets no tenant (caller returns 403).
+ */
+export async function resolveTenant(c: Context<AppContext>): Promise<string | null> {
+  if (c.env.MULTI_TENANT !== "true") {
+    return DEFAULT_TENANT_ID;
+  }
+  const email = (c.req.header("X-Auth-Email") ?? "").trim().toLowerCase();
+  if (!email) return null;
+  const row = await c.env.DB.prepare("SELECT tenant_id FROM tenant_members WHERE email = ?1")
+    .bind(email)
+    .first<{ tenant_id: string }>();
+  return row?.tenant_id ?? null;
 }
 
 export function requireAgent() {

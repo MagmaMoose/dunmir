@@ -37,9 +37,9 @@ admin.post("/agents", async (c) => {
   const now = nowSeconds();
   try {
     await c.env.DB.prepare(
-      "INSERT INTO agents (id, name, token_hash, created_at) VALUES (?1, ?2, ?3, ?4)",
+      "INSERT INTO agents (id, name, token_hash, created_at, tenant_id) VALUES (?1, ?2, ?3, ?4, ?5)",
     )
-      .bind(id, name.value, tokenHash, now)
+      .bind(id, name.value, tokenHash, now, c.get("tenantId")!)
       .run();
   } catch (err) {
     if (String(err).includes("UNIQUE")) return c.json({ error: "agent name already exists" }, 409);
@@ -50,14 +50,20 @@ admin.post("/agents", async (c) => {
 
 admin.get("/agents", async (c) => {
   const { results } = await c.env.DB.prepare(
-    "SELECT id, name, created_at, last_seen_at, disabled FROM agents ORDER BY created_at DESC",
-  ).all();
+    "SELECT id, name, created_at, last_seen_at, disabled FROM agents WHERE tenant_id = ?1 ORDER BY created_at DESC",
+  )
+    .bind(c.get("tenantId")!)
+    .all();
   return c.json({ agents: results });
 });
 
 admin.post("/agents/:id/disable", async (c) => {
   const id = c.req.param("id");
-  const res = await c.env.DB.prepare("UPDATE agents SET disabled = 1 WHERE id = ?1").bind(id).run();
+  const res = await c.env.DB.prepare(
+    "UPDATE agents SET disabled = 1 WHERE id = ?1 AND tenant_id = ?2",
+  )
+    .bind(id, c.get("tenantId")!)
+    .run();
   if ((res.meta.changes ?? 0) === 0) return c.json({ error: "not found" }, 404);
   return c.json({ ok: true });
 });
@@ -66,8 +72,10 @@ admin.post("/agents/:id/rotate-token", async (c) => {
   const id = c.req.param("id");
   const token = generateAgentToken();
   const tokenHash = await hashToken(token);
-  const res = await c.env.DB.prepare("UPDATE agents SET token_hash = ?1, disabled = 0 WHERE id = ?2")
-    .bind(tokenHash, id)
+  const res = await c.env.DB.prepare(
+    "UPDATE agents SET token_hash = ?1, disabled = 0 WHERE id = ?2 AND tenant_id = ?3",
+  )
+    .bind(tokenHash, id, c.get("tenantId")!)
     .run();
   if ((res.meta.changes ?? 0) === 0) return c.json({ error: "not found" }, 404);
   return c.json({ id, token });

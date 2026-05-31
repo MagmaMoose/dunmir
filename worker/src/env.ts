@@ -5,6 +5,12 @@ export interface Env {
   // ciphertext and re-streams it on download.
   BACKUPS: R2Bucket;
   ADMIN_TOKEN: string;
+  // Multi-tenancy. When "true", admin requests are scoped to the tenant the
+  // authenticated operator email (X-Auth-Email) belongs to; otherwise everything
+  // resolves to the single 'tnt_default' tenant (single-tenant / self-hosted).
+  MULTI_TENANT?: string;
+  // Comma-separated operator emails allowed to manage tenants (superadmin ops).
+  SUPERADMIN_EMAILS?: string;
   DEFAULT_HEARTBEAT_INTERVAL_SECONDS: string;
   DEFAULT_GRACE_SECONDS: string;
   // Optional Slack integration. When SLACK_BOT_TOKEN is set, every alert is
@@ -23,7 +29,10 @@ export interface Env {
 export type AppVariables = {
   agentId?: string;
   isAdmin?: boolean;
+  tenantId?: string; // set by requireAdmin; scopes all tenant-owned data
 };
+
+export const DEFAULT_TENANT_ID = "tnt_default";
 
 export type AppContext = {
   Bindings: Env;
