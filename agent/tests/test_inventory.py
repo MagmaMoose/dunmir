@@ -7,6 +7,7 @@ from mikrotik_minder_agent.inventory import (
     InventoryError,
     inventory_summary,
     parse_cloud,
+    parse_identity,
     parse_license,
     run_inventory,
 )
@@ -46,6 +47,10 @@ ROUTERBOARD_RB = """
               model: RB5009UPr+S+
    current-firmware: 7.18.2
    upgrade-firmware: 7.18.2
+"""
+
+IDENTITY = """
+       name: oci-rtr-01
 """
 
 
@@ -102,17 +107,25 @@ def test_parse_cloud_disabled() -> None:
     assert c.dns_name is None
 
 
+def test_parse_identity() -> None:
+    assert parse_identity(IDENTITY) == "oci-rtr-01"
+    assert parse_identity("bad command name identity") is None
+
+
 def test_run_inventory_chr_marks_no_routerboard() -> None:
     cap = FakeCapture(
         {
             "/system routerboard print": ROUTERBOARD_CHR,
             "/system license print": LICENSE_CHR,
             "/ip cloud print": CLOUD_FULL,
+            "/system identity print": IDENTITY,
         },
     )
     result = run_inventory(_device(), Defaults(), capture=cap)
     assert result.has_routerboard is False
     assert result.model is None
+    assert result.address == "1.1.1.1"
+    assert result.identity == "oci-rtr-01"
     assert result.license.level == "p1"
     assert result.cloud.dns_name == "1234abcd5678.sn.mynetname.net"
     assert "CHR" in inventory_summary(result)
@@ -124,6 +137,7 @@ def test_run_inventory_routerboard() -> None:
             "/system routerboard print": ROUTERBOARD_RB,
             "/system license print": LICENSE_ROUTERBOARD,
             "/ip cloud print": CLOUD_DISABLED,
+            "/system identity print": IDENTITY,
         },
     )
     result = run_inventory(_device(), Defaults(), capture=cap)

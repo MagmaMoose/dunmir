@@ -44,6 +44,8 @@ class InventoryResult:
     finished_at: int
     has_routerboard: bool
     model: str | None
+    address: str | None  # the host/IP the agent connects to (from config)
+    identity: str | None  # the router's own /system identity name
     license: LicenseInfo
     cloud: CloudInfo
 
@@ -87,14 +89,29 @@ def run_inventory(
     except TransportError as exc:
         log.warning("device %s cloud probe failed: %s", device.name, exc)
 
+    identity: str | None = None
+    try:
+        identity = parse_identity(client.capture("/system identity print", timeout=timeout))
+    except TransportError as exc:
+        log.warning("device %s identity probe failed: %s", device.name, exc)
+
     return InventoryResult(
         started_at=started,
         finished_at=int(time.time()),
         has_routerboard=fw.has_routerboard,
         model=fw.model,
+        address=device.address,
+        identity=identity,
         license=license,
         cloud=cloud,
     )
+
+
+def parse_identity(text: str) -> str | None:
+    """Parse ``/system identity print`` — the router's own name."""
+    if is_unknown_command(text):
+        return None
+    return kv_dict(text).get("name") or None
 
 
 def parse_license(text: str) -> LicenseInfo:

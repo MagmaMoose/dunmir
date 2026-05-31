@@ -593,6 +593,8 @@ class Daemon:
             state.last_inventory = float(result.finished_at)
 
         details: dict[str, object] = {
+            "address": result.address,
+            "identity": result.identity,
             "has_routerboard": result.has_routerboard,
             "is_chr": not result.has_routerboard,
             "model": result.model,
