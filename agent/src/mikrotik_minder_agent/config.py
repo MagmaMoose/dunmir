@@ -80,6 +80,7 @@ class Defaults:
     update_check_interval_seconds: int | None = None  # None = update checks disabled
     backup_interval_seconds: int | None = None        # None = backups disabled
     inventory_check_interval_seconds: int | None = 3600  # CHR/licence/cloud facts; None/0 = off
+    config_refresh_interval_seconds: int = 300  # remote mode: re-fetch device config every N s
     connect_timeout_seconds: float = 5.0
     export_timeout_seconds: float = 30.0
     update_check_timeout_seconds: float = 30.0
@@ -242,6 +243,7 @@ def _parse_defaults(raw: dict[str, Any]) -> Defaults:
         update_check_interval_seconds=int(update_check_interval) if update_check_interval else None,
         backup_interval_seconds=int(backup_interval) if backup_interval else None,
         inventory_check_interval_seconds=int(inventory_interval) if inventory_interval else None,
+        config_refresh_interval_seconds=int(raw.get("config_refresh_interval_seconds", 300)),
         connect_timeout_seconds=float(raw.get("connect_timeout_seconds", 5.0)),
         export_timeout_seconds=float(raw.get("export_timeout_seconds", 30.0)),
         update_check_timeout_seconds=float(raw.get("update_check_timeout_seconds", 30.0)),

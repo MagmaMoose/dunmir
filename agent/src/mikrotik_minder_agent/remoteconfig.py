@@ -39,6 +39,18 @@ def build_devices(
     return tuple(out)
 
 
+def devices_changed(
+    current: tuple[DeviceConfig, ...],
+    fetched: tuple[DeviceConfig, ...],
+) -> bool:
+    """True if two device sets differ by name → full config (order-independent).
+
+    DeviceConfig is a frozen dataclass, so this compares every field — including
+    the resolved credential — and ignores ordering.
+    """
+    return {d.name: d for d in current} != {d.name: d for d in fetched}
+
+
 def _build_one(entry: dict[str, Any], environ: Mapping[str, str]) -> DeviceConfig | None:
     name = entry.get("name")
     address = entry.get("address")
