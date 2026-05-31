@@ -58,7 +58,11 @@ def _build_one(entry: dict[str, Any], environ: Mapping[str, str]) -> DeviceConfi
     if isinstance(pw_env, str) and pw_env:
         password = environ.get(pw_env)
         if not password:
-            log.warning("remote config: device %s password_env %r not set; skipping", name, pw_env)
+            # Don't log the env-var name — keep credential references out of logs.
+            log.warning(
+                "remote config: device %s references a password env var that is not set; skipping",
+                name,
+            )
             return None
     key_path = cred.get("ssh_key_path")
     ssh_key_path = key_path if isinstance(key_path, str) and key_path else None
