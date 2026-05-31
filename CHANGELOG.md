@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.12.0 (2026-05-31)
+
+### Features
+
+- **agent**: Sealed-credential support (vault keypair + decrypt)
+  ([#38](https://github.com/MagmaMoose/mikrotik-minder/pull/38),
+  [`bb0cc0f`](https://github.com/MagmaMoose/mikrotik-minder/commit/bb0cc0f4c0135189755b5aa51a7a01c84bfa0433))
+
+
 ## v1.11.0 (2026-05-31)
 
 ### Features
