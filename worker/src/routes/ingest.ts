@@ -464,4 +464,84 @@ ingest.delete("/backups/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// --- Control-plane-managed config -----------------------------------------
+//
+// An agent running `config_source: remote` fetches its device list here each
+// cycle, so the UI is the source of truth. We return only devices that have a
+// connection `address` set (operator-configured), with credentials as
+// REFERENCES — the agent resolves `password_env` / `ssh_key_path` locally; the
+// control plane never holds a secret. See docs/rfc-control-plane-managed-config.md.
+//
+// The `credential.kind` field is the seam a proprietary provider extends with
+// `"sealed"` (envelope-encrypted) credentials; the OSS provider only emits "ref".
+
+interface DeviceConfigRow {
+  name: string;
+  address: string;
+  username: string | null;
+  password_env: string | null;
+  ssh_key_path: string | null;
+  transport_primary: string | null;
+  transport_fallback: string | null;
+  api_port: number | null;
+  use_tls: number | null;
+  ssh_port: number | null;
+  site: string | null;
+  role: string | null;
+  tags: string | null;
+  heartbeat_interval_seconds: number | null;
+  grace_seconds: number | null;
+}
+
+ingest.get("/config", async (c) => {
+  const agentId = c.get("agentId")!;
+  const { results } = await c.env.DB.prepare(
+    `SELECT name, address, username, password_env, ssh_key_path,
+            transport_primary, transport_fallback, api_port, use_tls, ssh_port,
+            site, role, tags, heartbeat_interval_seconds, grace_seconds
+       FROM devices
+      WHERE agent_id = ?1 AND address IS NOT NULL
+      ORDER BY name`,
+  )
+    .bind(agentId)
+    .all<DeviceConfigRow>();
+
+  const devices = results.map((d) => {
+    let tags: string[] | undefined;
+    if (d.tags) {
+      try {
+        const parsed = JSON.parse(d.tags);
+        if (Array.isArray(parsed)) tags = parsed;
+      } catch {
+        // ignore a malformed tags blob — it's non-essential metadata
+      }
+    }
+    return {
+      name: d.name,
+      address: d.address,
+      username: d.username ?? undefined,
+      transport: {
+        primary: d.transport_primary ?? undefined,
+        fallback: d.transport_fallback ?? undefined,
+      },
+      api_port: d.api_port ?? undefined,
+      use_tls: d.use_tls === null ? undefined : d.use_tls === 1,
+      ssh_port: d.ssh_port ?? undefined,
+      site: d.site ?? undefined,
+      role: d.role ?? undefined,
+      tags,
+      heartbeat_interval_seconds: d.heartbeat_interval_seconds ?? undefined,
+      grace_seconds: d.grace_seconds ?? undefined,
+      // OSS provider: credentials by reference. Pro emits { kind: "sealed", ... }.
+      credential: {
+        kind: "ref" as const,
+        password_env: d.password_env ?? undefined,
+        ssh_key_path: d.ssh_key_path ?? undefined,
+      },
+    };
+  });
+
+  return c.json({ version: 1, generated_at: nowSeconds(), devices });
+});
+
 export default ingest;
