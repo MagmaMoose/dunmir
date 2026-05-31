@@ -94,6 +94,9 @@ admin.post("/devices", async (c) => {
   if (!interval.ok) return c.json({ error: interval.error }, 400);
   const grace = asOptionalInt(body?.grace_seconds, "grace_seconds", { min: 0, max: 86400 });
   if (!grace.ok) return c.json({ error: grace.error }, 400);
+  // Display label — what the UI shows. `name` stays the immutable agent match-key.
+  const label = asOptionalString(body?.label, "label", { max: 100 });
+  if (!label.ok) return c.json({ error: label.error }, 400);
 
   // Connection details (control-plane-managed config). All optional; credentials
   // are stored only as references (env-var name / key path), never as secrets.
@@ -138,8 +141,8 @@ admin.post("/devices", async (c) => {
        heartbeat_interval_seconds = ?4, grace_seconds = ?5,
        address = ?6, username = ?7, password_env = ?8, ssh_key_path = ?9,
        transport_primary = ?10, transport_fallback = ?11,
-       api_port = ?12, use_tls = ?13, ssh_port = ?14
-       WHERE id = ?15`,
+       api_port = ?12, use_tls = ?13, ssh_port = ?14, label = ?15
+       WHERE id = ?16`,
     )
       .bind(
         site.value ?? null,
@@ -156,6 +159,7 @@ admin.post("/devices", async (c) => {
         apiPort.value ?? null,
         useTlsInt,
         sshPort.value ?? null,
+        label.value ?? null,
         id,
       )
       .run();
@@ -164,8 +168,8 @@ admin.post("/devices", async (c) => {
       `INSERT INTO devices
        (id, agent_id, name, site, role, tags, heartbeat_interval_seconds, grace_seconds,
         address, username, password_env, ssh_key_path, transport_primary, transport_fallback,
-        api_port, use_tls, ssh_port, last_status, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 'unknown', ?18)`,
+        api_port, use_tls, ssh_port, label, last_status, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, 'unknown', ?19)`,
     )
       .bind(
         id,
@@ -185,6 +189,7 @@ admin.post("/devices", async (c) => {
         apiPort.value ?? null,
         useTlsInt,
         sshPort.value ?? null,
+        label.value ?? null,
         now,
       )
       .run();
