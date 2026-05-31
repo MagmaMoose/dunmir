@@ -114,7 +114,7 @@ def test_run_inventory_chr_marks_no_routerboard() -> None:
     assert result.has_routerboard is False
     assert result.model is None
     assert result.license.level == "p1"
-    assert result.cloud.dns_name.endswith("mynetname.net")
+    assert result.cloud.dns_name == "1234abcd5678.sn.mynetname.net"
     assert "CHR" in inventory_summary(result)
 
 
