@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.13.0 (2026-05-31)
+
+### Features
+
+- **worker**: Multi-tenancy foundation — tenant model + scoped agents (phase 1)
+  ([#39](https://github.com/MagmaMoose/mikrotik-minder/pull/39),
+  [`0918628`](https://github.com/MagmaMoose/mikrotik-minder/commit/0918628ad78fffcf8893f6bb5fd8ce0c5d221a7d))
+
+- **worker**: Sealed-credential + agent-key plumbing for the Pro vault
+  ([#37](https://github.com/MagmaMoose/mikrotik-minder/pull/37),
+  [`0fa4878`](https://github.com/MagmaMoose/mikrotik-minder/commit/0fa4878c974b3218c5f44ba2c7f2eda4de94a9b8))
+
+
 ## v1.12.0 (2026-05-31)
 
 ### Features
