@@ -122,6 +122,7 @@ class AgentConfig:
     git: GitConfig | None = None
     backup: BackupConfig | None = None
     config_source: str = "local"  # 'local' | 'remote' (fetch device list from control plane)
+    agent_key_path: str | None = None  # Curve25519 key for the Pro vault; None = no sealed creds
 
 
 # --- Loader --------------------------------------------------------------------------------------
@@ -185,6 +186,7 @@ def parse_config(raw: dict[str, Any], *, require_server_token: bool = True) -> A
         git=git,
         backup=backup,
         config_source=config_source,
+        agent_key_path=raw.get("agent_key_path"),
     )
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from mikrotik_minder_agent.remoteconfig import build_devices, devices_changed
@@ -45,9 +46,24 @@ def test_build_devices_skips_unresolved_password() -> None:
     assert build_devices(_doc(), env={}) == ()
 
 
-def test_build_devices_skips_sealed_credentials() -> None:
+def test_build_devices_skips_sealed_without_unseal() -> None:
+    # No vault key on the agent → sealed devices are skipped.
     doc = _doc(credential={"kind": "sealed", "blob": "ciphertext"})
     assert build_devices(doc, env={"RTR01_PW": "x"}) == ()
+
+
+def test_build_devices_decrypts_sealed_with_unseal() -> None:
+    from nacl.public import PrivateKey, PublicKey, SealedBox
+
+    from mikrotik_minder_agent.agentkeys import make_unsealer
+
+    sk = PrivateKey.generate()
+    pub = base64.b64encode(bytes(sk.public_key)).decode()
+    sealed = SealedBox(PublicKey(base64.b64decode(pub))).encrypt(b"vault-pw")
+    doc = _doc(credential={"kind": "sealed", "blob": base64.b64encode(sealed).decode()})
+    devices = build_devices(doc, unseal=make_unsealer(sk))
+    assert len(devices) == 1
+    assert devices[0].password == "vault-pw"
 
 
 def test_build_devices_accepts_ssh_key_ref_without_password() -> None:

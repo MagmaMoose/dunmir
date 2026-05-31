@@ -11,6 +11,7 @@ import logging
 import signal
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .backup import BackupError, BackupResult, BackupRunner, backup_summary
@@ -66,9 +67,16 @@ class DeviceState:
 class Daemon:
     """Runs one thread per device. Call ``run()`` to block, or ``run_once()`` for cron-style."""
 
-    def __init__(self, config: AgentConfig, *, dry_run: bool = False) -> None:
+    def __init__(
+        self,
+        config: AgentConfig,
+        *,
+        dry_run: bool = False,
+        unseal: Callable[[str], str] | None = None,
+    ) -> None:
         self._config = config
         self._dry_run = dry_run
+        self._unseal = unseal  # decrypts sealed (vault) credentials on config refresh
         self._stop = threading.Event()
         # Stagger first ticks so a (re)start doesn't stampede the whole fleet.
         self._state: dict[str, DeviceState] = {
@@ -155,7 +163,7 @@ class Daemon:
             return
         while not self._stop.wait(timeout=interval):
             try:
-                fetched = build_devices(minder.fetch_config())
+                fetched = build_devices(minder.fetch_config(), unseal=self._unseal)
             except MinderError as exc:
                 log.warning("config refresh failed (%s); keeping current devices", exc)
                 continue

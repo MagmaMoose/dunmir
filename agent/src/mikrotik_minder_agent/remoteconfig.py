@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
+from .agentkeys import AgentKeyError
 from .config import DeviceConfig, TransportPolicy
 
 log = logging.getLogger(__name__)
@@ -24,8 +25,13 @@ def build_devices(
     doc: dict[str, Any],
     *,
     env: Mapping[str, str] | None = None,
+    unseal: Callable[[str], str] | None = None,
 ) -> tuple[DeviceConfig, ...]:
-    """Map the config doc's ``devices`` into DeviceConfig, resolving credential refs."""
+    """Map the config doc's ``devices`` into DeviceConfig, resolving credentials.
+
+    ``unseal`` decrypts ``kind: "sealed"`` credentials with the agent's vault
+    key; when it's None, sealed devices are skipped.
+    """
     environ = env if env is not None else os.environ
     entries = doc.get("devices")
     if not isinstance(entries, list):
@@ -33,7 +39,7 @@ def build_devices(
     out: list[DeviceConfig] = []
     for entry in entries:
         if isinstance(entry, dict):
-            device = _build_one(entry, environ)
+            device = _build_one(entry, environ, unseal)
             if device is not None:
                 out.append(device)
     return tuple(out)
@@ -51,7 +57,11 @@ def devices_changed(
     return {d.name: d for d in current} != {d.name: d for d in fetched}
 
 
-def _build_one(entry: dict[str, Any], environ: Mapping[str, str]) -> DeviceConfig | None:
+def _build_one(
+    entry: dict[str, Any],
+    environ: Mapping[str, str],
+    unseal: Callable[[str], str] | None,
+) -> DeviceConfig | None:
     name = entry.get("name")
     address = entry.get("address")
     if not isinstance(name, str) or not name or not isinstance(address, str) or not address:
@@ -60,24 +70,40 @@ def _build_one(entry: dict[str, Any], environ: Mapping[str, str]) -> DeviceConfi
 
     cred = entry.get("credential")
     cred = cred if isinstance(cred, dict) else {}
-    if cred.get("kind") == "sealed":
-        log.warning("remote config: device %s has sealed credentials (Pro only); skipping", name)
-        return None
-
-    # "ref" (or unspecified): resolve references from the local environment.
     password: str | None = None
-    pw_env = cred.get("password_env")
-    if isinstance(pw_env, str) and pw_env:
-        password = environ.get(pw_env)
-        if not password:
-            # Don't log the env-var name — keep credential references out of logs.
+    ssh_key_path: str | None = None
+    if cred.get("kind") == "sealed":
+        blob = cred.get("blob")
+        if unseal is None or not isinstance(blob, str):
             log.warning(
-                "remote config: device %s references a password env var that is not set; skipping",
+                "remote config: device %s is sealed but the agent has no vault key; skipping",
                 name,
             )
             return None
-    key_path = cred.get("ssh_key_path")
-    ssh_key_path = key_path if isinstance(key_path, str) and key_path else None
+        try:
+            password = unseal(blob)
+        except AgentKeyError as exc:
+            log.warning(
+                "remote config: device %s sealed credential decrypt failed (%s); skipping",
+                name,
+                exc,
+            )
+            return None
+    else:
+        # "ref" (or unspecified): resolve references from the local environment.
+        pw_env = cred.get("password_env")
+        if isinstance(pw_env, str) and pw_env:
+            password = environ.get(pw_env)
+            if not password:
+                # Don't log the env-var name — keep credential references out of logs.
+                log.warning(
+                    "remote config: device %s password env var is not set; skipping",
+                    name,
+                )
+                return None
+        key_path = cred.get("ssh_key_path")
+        if isinstance(key_path, str) and key_path:
+            ssh_key_path = key_path
     if not password and not ssh_key_path:
         log.warning("remote config: device %s has no usable credential; skipping", name)
         return None

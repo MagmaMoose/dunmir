@@ -119,6 +119,15 @@ def test_config_source_invalid_rejected() -> None:
         })
 
 
+def test_agent_key_path_parsed() -> None:
+    cfg = parse_config({
+        "server": {"url": "https://x", "agent_token": "t"},
+        "config_source": "remote",
+        "agent_key_path": "/var/lib/mikrotik-minder/agent_key",
+    })
+    assert cfg.agent_key_path == "/var/lib/mikrotik-minder/agent_key"
+
+
 def test_quoted_string_use_tls_is_rejected() -> None:
     """`bool('false')` is True. Strict-bool validation must catch quoted booleans."""
     with pytest.raises(ConfigError, match="use_tls must be a boolean"):
