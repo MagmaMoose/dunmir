@@ -265,8 +265,8 @@ admin.post("/alert-routes", async (c) => {
   const id = newId("route");
   try {
     await c.env.DB.prepare(
-      `INSERT INTO alert_routes (id, name, kind, url, events, min_severity, enabled, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)`,
+      `INSERT INTO alert_routes (id, name, kind, url, events, min_severity, enabled, created_at, tenant_id)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)`,
     )
       .bind(
         id,
@@ -276,6 +276,7 @@ admin.post("/alert-routes", async (c) => {
         events.value ? JSON.stringify(events.value) : null,
         minSeverity,
         nowSeconds(),
+        c.get("tenantId")!,
       )
       .run();
   } catch (err) {
@@ -287,13 +288,20 @@ admin.post("/alert-routes", async (c) => {
 
 admin.get("/alert-routes", async (c) => {
   const { results } = await c.env.DB.prepare(
-    "SELECT id, name, kind, url, events, min_severity, enabled, created_at FROM alert_routes ORDER BY name",
-  ).all();
+    `SELECT id, name, kind, url, events, min_severity, enabled, created_at
+       FROM alert_routes WHERE tenant_id = ?1 ORDER BY name`,
+  )
+    .bind(c.get("tenantId")!)
+    .all();
   return c.json({ routes: results });
 });
 
 admin.delete("/alert-routes/:id", async (c) => {
-  const res = await c.env.DB.prepare("DELETE FROM alert_routes WHERE id = ?1").bind(c.req.param("id")).run();
+  const res = await c.env.DB.prepare(
+    "DELETE FROM alert_routes WHERE id = ?1 AND tenant_id = ?2",
+  )
+    .bind(c.req.param("id"), c.get("tenantId")!)
+    .run();
   if ((res.meta.changes ?? 0) === 0) return c.json({ error: "not found" }, 404);
   return c.json({ ok: true });
 });
@@ -313,6 +321,7 @@ admin.post("/alerts/test", async (c) => {
       kind: "manual",
       title: message,
       payload: { source: "admin", note: "manual test" },
+      tenant_id: c.get("tenantId")!,
     },
     c.executionCtx,
   );
