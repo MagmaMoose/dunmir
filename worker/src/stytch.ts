@@ -184,6 +184,30 @@ export function requireCustomer() {
   };
 }
 
+/** Result of authenticating a customer bearer token. `invalid` → not a valid
+ * Stytch session (→ 401); `no-tenant` → a valid session whose org has no
+ * provisioned tenant (→ 403). */
+export type CustomerAuth =
+  | { ok: true; tenantId: string; userId: string }
+  | { ok: false; reason: "invalid" | "no-tenant" };
+
+/**
+ * Authenticate a bearer token as a Stytch customer session and resolve tenant +
+ * user. Never throws — for the dual-path operator middleware (auth.ts
+ * `requireOperator`). Distinguishes an invalid token from a valid-but-
+ * unprovisioned org so the caller can answer 401 vs 403.
+ */
+export async function customerFromBearer(token: string, env: Env): Promise<CustomerAuth> {
+  let session: StytchSession;
+  try {
+    session = await validateStytchSession(token, env);
+  } catch {
+    return { ok: false, reason: "invalid" };
+  }
+  const resolved = await resolveCustomer(env, session);
+  return resolved ? { ok: true, ...resolved } : { ok: false, reason: "no-tenant" };
+}
+
 /**
  * Map a validated Stytch session → local tenant + user, JIT-linking the member
  * to a local user + membership on first sight. The org→tenant link MUST already

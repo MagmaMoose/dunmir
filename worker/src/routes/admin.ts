@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
-import { generateAgentToken, hashToken, requireAdmin } from "../auth";
+import { generateAgentToken, hashToken, requireOperator } from "../auth";
 import { newId, nowSeconds } from "../ids";
 import {
   ALERT_KINDS,
@@ -22,7 +22,7 @@ import {
 import { fireAlert } from "../notify";
 
 const admin = new Hono<AppContext>();
-admin.use("*", requireAdmin());
+admin.use("*", requireOperator());
 
 // --- Agents ---------------------------------------------------------------
 
