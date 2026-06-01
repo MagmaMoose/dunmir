@@ -218,12 +218,32 @@ async function resolveCustomer(
   env: Env,
   s: StytchSession,
 ): Promise<{ tenantId: string; userId: string } | null> {
-  const tenant = await env.DB.prepare(
+  const now = nowSeconds();
+  let tenant = await env.DB.prepare(
     "SELECT id FROM tenants WHERE stytch_org_id = ?1 AND deleted_at IS NULL",
   )
     .bind(s.organizationId)
     .first<{ id: string }>();
-  if (!tenant) return null;
+
+  // JIT onboarding: a Stytch org with no local tenant gets a fresh one on first
+  // authenticated session. A valid session proves the member authenticated to a
+  // real org in this project, so first-touch provisioning IS the self-serve
+  // signup. The member who creates the tenant becomes its owner.
+  let newTenant = false;
+  if (!tenant) {
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO tenants (id, name, stytch_org_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+    )
+      .bind(newId("tnt"), s.organizationId, s.organizationId, now)
+      .run();
+    tenant = await env.DB.prepare(
+      "SELECT id FROM tenants WHERE stytch_org_id = ?1 AND deleted_at IS NULL",
+    )
+      .bind(s.organizationId)
+      .first<{ id: string }>();
+    if (!tenant) return null;
+    newTenant = true;
+  }
 
   const existing = await env.DB.prepare(
     "SELECT user_id FROM auth_accounts WHERE provider = 'stytch' AND provider_user_id = ?1",
@@ -231,7 +251,6 @@ async function resolveCustomer(
     .bind(s.memberId)
     .first<{ user_id: string }>();
 
-  const now = nowSeconds();
   if (existing) {
     await env.DB.prepare("UPDATE users SET last_seen_at = ?1 WHERE id = ?2")
       .bind(now, existing.user_id)
@@ -268,9 +287,9 @@ async function resolveCustomer(
     .run();
   await env.DB.prepare(
     `INSERT OR IGNORE INTO tenant_memberships (tenant_id, user_id, role, created_at)
-       VALUES (?1, ?2, 'member', ?3)`,
+       VALUES (?1, ?2, ?3, ?4)`,
   )
-    .bind(tenant.id, user.id, now)
+    .bind(tenant.id, user.id, newTenant ? "owner" : "member", now)
     .run();
 
   return { tenantId: tenant.id, userId: user.id };
