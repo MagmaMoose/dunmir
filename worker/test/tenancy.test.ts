@@ -110,6 +110,10 @@ describe("multi-tenant admin isolation", () => {
     expect(cross.status).toBe(404);
     expect(await cross.text()).not.toContain(FX.artifactB);
 
+    // Verify that cross-tenant request did not purge the artifact (purge-on-read handler)
+    const cmdRow = db.prepare("SELECT artifact FROM commands WHERE id = ?").get(FX.cmdB) as { artifact: string | null };
+    expect(cmdRow.artifact).toBe(FX.artifactB);
+
     // A's own command passes the tenant gate (NOT 404/403). We don't assert the
     // body here: the purge query returns it via a self-referencing CTE whose
     // materialization differs across SQLite versions — orthogonal to isolation.
