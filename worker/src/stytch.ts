@@ -136,6 +136,13 @@ async function resolveCustomer(
     await env.DB.prepare("UPDATE users SET last_seen_at = ?1 WHERE id = ?2")
       .bind(now, existing.user_id)
       .run();
+    // Ensure tenant membership exists for this user (idempotent).
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO tenant_memberships (tenant_id, user_id, role, created_at)
+         VALUES (?1, ?2, 'member', ?3)`,
+    )
+      .bind(tenant.id, existing.user_id, now)
+      .run();
     return { tenantId: tenant.id, userId: existing.user_id };
   }
 
