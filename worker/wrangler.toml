@@ -44,6 +44,16 @@ SLACK_INFO_CHANNEL = ""
 # Public base URL of the Pro UI. Used to build deep links in alerts (Slack
 # "Download" buttons, etc.). Leave empty to suppress link rendering.
 PRO_UI_URL = ""
+# Stytch B2B customer auth (#26). NON-SECRET — set these per deploy; do NOT commit
+# a customer's prod project id to this public repo. Derive from your project id:
+#   STYTCH_JWKS_URL = https://live.stytch.com/v1/sessions/jwks/<project_id>
+#                     (use test.stytch.com for a test project)
+#   STYTCH_ISSUER   = stytch.com/<project_id>
+# The Stytch API SECRET is NOT needed here — the worker validates JWTs locally via
+# JWKS (Web Crypto). The secret lives only in the Pro app's Pages secrets.
+STYTCH_PROJECT_ID = ""
+STYTCH_JWKS_URL = ""
+STYTCH_ISSUER = ""
 
 [observability]
 enabled = true

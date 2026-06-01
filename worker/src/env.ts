@@ -24,12 +24,18 @@ export interface Env {
   // Optional. Public base URL of the Pro UI (no trailing slash). Used to build
   // deep links in Slack alert bodies (Download buttons, etc.).
   PRO_UI_URL?: string;
+  // Stytch B2B customer auth (#26). Non-secret: the worker validates customer
+  // session JWTs locally against the project JWKS — no Stytch secret at the edge.
+  STYTCH_PROJECT_ID?: string;
+  STYTCH_JWKS_URL?: string;
+  STYTCH_ISSUER?: string;
 }
 
 export type AppVariables = {
   agentId?: string;
   isAdmin?: boolean;
-  tenantId?: string; // set by requireAdmin; scopes all tenant-owned data
+  tenantId?: string; // set by requireAdmin / requireCustomer; scopes all tenant-owned data
+  userId?: string; // set by requireCustomer (Stytch) — the authenticated customer user
 };
 
 export const DEFAULT_TENANT_ID = "tnt_default";
