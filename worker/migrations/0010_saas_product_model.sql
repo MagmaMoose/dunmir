@@ -12,7 +12,9 @@
 -- Customer org metadata, layered on the existing `tenants` foundation.
 ALTER TABLE tenants ADD COLUMN slug TEXT;          -- URL-safe org handle (mirrors the Stytch org slug)
 ALTER TABLE tenants ADD COLUMN deleted_at INTEGER; -- soft delete; NULL = active
+ALTER TABLE tenants ADD COLUMN stytch_org_id TEXT; -- Stytch B2B organization_id this tenant maps to
 CREATE UNIQUE INDEX tenants_slug_idx ON tenants(slug) WHERE slug IS NOT NULL;
+CREATE UNIQUE INDEX tenants_stytch_org_idx ON tenants(stytch_org_id) WHERE stytch_org_id IS NOT NULL;
 
 -- A human. Identity is federated (Stytch), but product authorization roots here.
 CREATE TABLE users (
