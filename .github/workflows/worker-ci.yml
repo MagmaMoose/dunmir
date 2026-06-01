@@ -37,6 +37,8 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Tenant isolation tests
+        run: npm test
       - name: Wrangler dry deploy
         env:
           CLOUDFLARE_API_TOKEN: dummy
