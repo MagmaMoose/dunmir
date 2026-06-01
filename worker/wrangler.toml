@@ -46,10 +46,11 @@ SLACK_INFO_CHANNEL = ""
 PRO_UI_URL = ""
 # Stytch B2B customer auth (#26). NON-SECRET — set these per deploy; do NOT commit
 # a customer's prod project id to this public repo. Derive from your project id:
-#   STYTCH_JWKS_URL = https://api.stytch.com/v1/b2b/sessions/jwks/<project_id>
+#   STYTCH_JWKS_URL = https://live.stytch.com/v1/sessions/jwks/<project_id>
+#                     (use test.stytch.com for a test project)
 #   STYTCH_ISSUER   = stytch.com/<project_id>
 # The Stytch API SECRET is NOT needed here — the worker validates JWTs locally via
-# JWKS. The secret lives only in the Pro app's Pages secrets.
+# JWKS (Web Crypto). The secret lives only in the Pro app's Pages secrets.
 STYTCH_PROJECT_ID = ""
 STYTCH_JWKS_URL = ""
 STYTCH_ISSUER = ""
