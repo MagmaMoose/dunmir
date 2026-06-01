@@ -2,6 +2,49 @@
 
 <!-- version list -->
 
+## v1.17.0 (2026-06-01)
+
+### Bug Fixes
+
+- **stytch**: Ensure tenant_memberships row exists for existing users
+  ([#50](https://github.com/MagmaMoose/dunmir/pull/50),
+  [`fde66c1`](https://github.com/MagmaMoose/dunmir/commit/fde66c1998da0c277648a5f64c1a493393a884e6))
+
+- **stytch**: Normalize email before upsert to avoid duplicate users on case/whitespace differences
+  ([#50](https://github.com/MagmaMoose/dunmir/pull/50),
+  [`fde66c1`](https://github.com/MagmaMoose/dunmir/commit/fde66c1998da0c277648a5f64c1a493393a884e6))
+
+- **worker**: Restrict JWT verification to RS256 algorithm
+  ([#50](https://github.com/MagmaMoose/dunmir/pull/50),
+  [`fde66c1`](https://github.com/MagmaMoose/dunmir/commit/fde66c1998da0c277648a5f64c1a493393a884e6))
+
+- **worker**: Validate Stytch JWTs with Web Crypto, drop jose (fixes CI)
+  ([#50](https://github.com/MagmaMoose/dunmir/pull/50),
+  [`fde66c1`](https://github.com/MagmaMoose/dunmir/commit/fde66c1998da0c277648a5f64c1a493393a884e6))
+
+### Features
+
+- **worker**: Add tenants.stytch_org_id for the Stytch org→tenant map
+  ([#50](https://github.com/MagmaMoose/dunmir/pull/50),
+  [`fde66c1`](https://github.com/MagmaMoose/dunmir/commit/fde66c1998da0c277648a5f64c1a493393a884e6))
+
+- **worker**: SaaS product-model migration (0010)
+  ([#50](https://github.com/MagmaMoose/dunmir/pull/50),
+  [`fde66c1`](https://github.com/MagmaMoose/dunmir/commit/fde66c1998da0c277648a5f64c1a493393a884e6))
+
+- **worker**: SaaS product-model migration (0010) — users / memberships / billing
+  ([#50](https://github.com/MagmaMoose/dunmir/pull/50),
+  [`fde66c1`](https://github.com/MagmaMoose/dunmir/commit/fde66c1998da0c277648a5f64c1a493393a884e6))
+
+- **worker**: Stytch B2B session validation (SaaS Phase 1 §4)
+  ([#50](https://github.com/MagmaMoose/dunmir/pull/50),
+  [`fde66c1`](https://github.com/MagmaMoose/dunmir/commit/fde66c1998da0c277648a5f64c1a493393a884e6))
+
+- **worker**: Stytch B2B session validation for customer auth
+  ([#50](https://github.com/MagmaMoose/dunmir/pull/50),
+  [`fde66c1`](https://github.com/MagmaMoose/dunmir/commit/fde66c1998da0c277648a5f64c1a493393a884e6))
+
+
 ## v1.16.0 (2026-06-01)
 
 ### Bug Fixes
