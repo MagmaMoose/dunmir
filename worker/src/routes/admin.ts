@@ -128,8 +128,10 @@ admin.post("/devices", async (c) => {
   if (!useTls.ok) return c.json({ error: useTls.error }, 400);
   const useTlsInt = useTls.value === undefined ? null : useTls.value ? 1 : 0;
 
-  const agent = await c.env.DB.prepare("SELECT id FROM agents WHERE id = ?1 AND disabled = 0")
-    .bind(agentId.value)
+  const agent = await c.env.DB.prepare(
+    "SELECT id FROM agents WHERE id = ?1 AND disabled = 0 AND tenant_id = ?2",
+  )
+    .bind(agentId.value, c.get("tenantId")!)
     .first();
   if (!agent) return c.json({ error: "agent not found" }, 404);
 
@@ -209,13 +211,19 @@ admin.get("/devices", async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT id, agent_id, name, site, role, tags, heartbeat_interval_seconds, grace_seconds,
             last_seen_at, last_status, last_status_changed_at, created_at
-     FROM devices ORDER BY name`,
-  ).all();
+     FROM devices WHERE agent_id IN (SELECT id FROM agents WHERE tenant_id = ?1) ORDER BY name`,
+  )
+    .bind(c.get("tenantId")!)
+    .all();
   return c.json({ devices: results });
 });
 
 admin.delete("/devices/:id", async (c) => {
-  const res = await c.env.DB.prepare("DELETE FROM devices WHERE id = ?1").bind(c.req.param("id")).run();
+  const res = await c.env.DB.prepare(
+    "DELETE FROM devices WHERE id = ?1 AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)",
+  )
+    .bind(c.req.param("id"), c.get("tenantId")!)
+    .run();
   if ((res.meta.changes ?? 0) === 0) return c.json({ error: "not found" }, 404);
   return c.json({ ok: true });
 });
@@ -233,8 +241,11 @@ admin.post("/devices/:id/sealed-credential", async (c) => {
   if (typeof sealed === "string" && sealed.length > 10000) {
     return c.json({ error: "sealed blob exceeds 10000 chars" }, 400);
   }
-  const res = await c.env.DB.prepare("UPDATE devices SET credential_sealed = ?1 WHERE id = ?2")
-    .bind(sealed ?? null, c.req.param("id"))
+  const res = await c.env.DB.prepare(
+    `UPDATE devices SET credential_sealed = ?1
+       WHERE id = ?2 AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?3)`,
+  )
+    .bind(sealed ?? null, c.req.param("id"), c.get("tenantId")!)
     .run();
   if ((res.meta.changes ?? 0) === 0) return c.json({ error: "not found" }, 404);
   return c.json({ ok: true });
@@ -353,8 +364,11 @@ admin.post("/commands", async (c) => {
     return c.json({ error: "params must be an object" }, 400);
   }
 
-  const dev = await c.env.DB.prepare("SELECT id, agent_id FROM devices WHERE id = ?1")
-    .bind(deviceId.value)
+  const dev = await c.env.DB.prepare(
+    `SELECT id, agent_id FROM devices
+       WHERE id = ?1 AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)`,
+  )
+    .bind(deviceId.value, c.get("tenantId")!)
     .first<{ id: string; agent_id: string }>();
   if (!dev) return c.json({ error: "device not found" }, 404);
 
@@ -382,19 +396,27 @@ admin.post("/commands", async (c) => {
 // secret-bearing /export body is delivered exactly once and never re-served.
 admin.get("/commands/:id/artifact", async (c) => {
   const id = c.req.param("id");
+  const tenantId = c.get("tenantId")!;
   const row = await c.env.DB.prepare(
     `WITH old AS (
-       SELECT artifact FROM commands WHERE id = ?1 AND artifact IS NOT NULL
+       SELECT artifact FROM commands
+        WHERE id = ?1 AND artifact IS NOT NULL
+          AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)
      )
      UPDATE commands SET artifact = NULL
      WHERE id = ?1 AND artifact IS NOT NULL
+       AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)
      RETURNING (SELECT artifact FROM old) AS artifact`
   )
-    .bind(id)
+    .bind(id, tenantId)
     .first<{ artifact: string | null }>();
   if (!row || row.artifact === null) {
     // Either the row doesn't exist, or artifact was already NULL (already downloaded)
-    const cmd = await c.env.DB.prepare("SELECT id, status FROM commands WHERE id = ?1").bind(id).first<{ id: string; status: string }>();
+    const cmd = await c.env.DB.prepare(
+      "SELECT id, status FROM commands WHERE id = ?1 AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)",
+    )
+      .bind(id, tenantId)
+      .first<{ id: string; status: string }>();
     if (!cmd) return c.json({ error: "not found" }, 404);
     if (cmd.status === "pending" || cmd.status === "claimed") {
       return c.json({ error: "command not yet ready" }, 202);
@@ -419,10 +441,11 @@ admin.get("/devices/:id/backups", async (c) => {
     `SELECT id, file_name, size_bytes, sha256, created_at
        FROM backup_files
       WHERE device_id = ?1
+        AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)
    ORDER BY created_at DESC
       LIMIT 200`,
   )
-    .bind(id)
+    .bind(id, c.get("tenantId")!)
     .all();
   return c.json({ backups: results });
 });
@@ -433,9 +456,10 @@ admin.get("/devices/:id/backups", async (c) => {
 admin.get("/backups/:id/download", async (c) => {
   const id = c.req.param("id");
   const row = await c.env.DB.prepare(
-    "SELECT file_name, r2_key, sha256 FROM backup_files WHERE id = ?1",
+    `SELECT file_name, r2_key, sha256 FROM backup_files
+       WHERE id = ?1 AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)`,
   )
-    .bind(id)
+    .bind(id, c.get("tenantId")!)
     .first<{ file_name: string; r2_key: string; sha256: string }>();
   if (!row) return c.json({ error: "not found" }, 404);
 
