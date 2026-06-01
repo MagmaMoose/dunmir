@@ -59,6 +59,7 @@ export async function validateStytchSession(token: string, env: Env): Promise<St
     issuer: env.STYTCH_ISSUER,
     audience: env.STYTCH_PROJECT_ID,
     clockTolerance: 30,
+    algorithms: ['RS256'],
   });
   const memberId = typeof payload.sub === "string" ? payload.sub : null;
   const organizationId = pickString(payload, "organization_id");
