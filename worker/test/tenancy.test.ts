@@ -45,8 +45,11 @@ function call(env: unknown, path: string, opts: CallOpts = {}): Promise<Response
 
 describe("multi-tenant admin isolation", () => {
   let env: ReturnType<typeof makeEnv>["env"];
+  let db: ReturnType<typeof makeEnv>["db"];
   beforeEach(() => {
-    env = makeEnv().env;
+    const result = makeEnv();
+    env = result.env;
+    db = result.db;
   });
 
   it("agents list is scoped to the operator's tenant", async () => {
@@ -81,12 +84,17 @@ describe("multi-tenant admin isolation", () => {
   });
 
   it("enqueue against another tenant's device is 404 (no command created)", async () => {
+    const beforeCount = (db.prepare("SELECT COUNT(*) as cnt FROM commands").get() as { cnt: number }).cnt;
+
     const cross = await call(env, "/v1/admin/commands", {
       method: "POST",
       email: FX.emailA,
       body: { device_id: FX.deviceB, kind: "backup" },
     });
     expect(cross.status).toBe(404);
+
+    const afterCrossCount = (db.prepare("SELECT COUNT(*) as cnt FROM commands").get() as { cnt: number }).cnt;
+    expect(afterCrossCount).toBe(beforeCount);
 
     const own = await call(env, "/v1/admin/commands", {
       method: "POST",
