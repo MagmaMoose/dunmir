@@ -7,6 +7,7 @@
  * resource appear in the other's response — which these assertions catch.
  */
 import { beforeEach, describe, expect, it } from "vitest";
+import type { Env } from "../src/env";
 import worker from "../src/index";
 import { FX, migratedDb, seedTwoTenants, ShimD1 } from "./d1";
 
@@ -14,24 +15,33 @@ const ADMIN_TOKEN = "mtm_test_admin_token";
 
 type CallOpts = { method?: string; email?: string; body?: unknown };
 
-function makeEnv(overrides: Record<string, unknown> = {}) {
+// A no-op R2 bucket. The isolation tests never reach a positive R2 read (cross-
+// tenant requests 404 before the storage lookup), but binding it keeps the env
+// representative so a future test that does hit the download path fails cleanly
+// rather than on an undefined binding.
+const stubBackups = { get: async () => null } as unknown as Env["BACKUPS"];
+
+function makeEnv(overrides: Partial<Env> = {}): { env: Env; db: ReturnType<typeof migratedDb> } {
   const db = migratedDb();
   seedTwoTenants(db);
-  return {
-    env: {
-      DB: new ShimD1(db),
-      ADMIN_TOKEN,
-      MULTI_TENANT: "true",
-      SUPERADMIN_EMAILS: "root@root.example",
-      ...overrides,
-    } as unknown as Parameters<typeof worker.fetch>[1],
-    db,
+  const env: Env = {
+    // ShimD1 implements the slice of D1Database the worker uses; this is the one
+    // unavoidable seam between better-sqlite3 and the Workers types.
+    DB: new ShimD1(db) as unknown as Env["DB"],
+    BACKUPS: stubBackups,
+    ADMIN_TOKEN,
+    MULTI_TENANT: "true",
+    SUPERADMIN_EMAILS: "root@root.example",
+    DEFAULT_HEARTBEAT_INTERVAL_SECONDS: "3600",
+    DEFAULT_GRACE_SECONDS: "600",
+    ...overrides,
   };
+  return { env, db };
 }
 
 const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
 
-function call(env: unknown, path: string, opts: CallOpts = {}): Promise<Response> {
+function call(env: Env, path: string, opts: CallOpts = {}): Promise<Response> {
   const headers: Record<string, string> = { authorization: `Bearer ${ADMIN_TOKEN}` };
   if (opts.email) headers["X-Auth-Email"] = opts.email;
   if (opts.body !== undefined) headers["content-type"] = "application/json";
@@ -40,7 +50,7 @@ function call(env: unknown, path: string, opts: CallOpts = {}): Promise<Response
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
-  return worker.fetch(req, env as Parameters<typeof worker.fetch>[1], ctx);
+  return worker.fetch(req, env, ctx);
 }
 
 describe("multi-tenant admin isolation", () => {
