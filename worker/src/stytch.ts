@@ -140,7 +140,7 @@ async function resolveCustomer(
 
   // First sight of this member: reuse a user with the same email or create one,
   // then link the Stytch account + tenant membership. All idempotent.
-  const email = s.email ?? `${s.memberId}@members.stytch`;
+  const email = s.email?.trim().toLowerCase() ?? `${s.memberId}@members.stytch`;
   await env.DB.prepare(
     `INSERT INTO users (id, primary_email, created_at, last_seen_at) VALUES (?1, ?2, ?3, ?3)
        ON CONFLICT(primary_email) DO UPDATE SET last_seen_at = ?3`,
