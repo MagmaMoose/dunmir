@@ -46,7 +46,14 @@ def run(config_path: str, once: bool, dry_run: bool, verbose: int) -> None:
     _configure_logging(verbose)
     config = _load(config_path)
     unseal, public_key = _vault_unsealer(config)
-    if public_key and config.config_source == "remote":
+    # Register the vault public key whenever the agent has one — independent of
+    # config_source. Registration only lets the Pro UI *seal* a credential to this
+    # agent (the key is public; publishing it is harmless and idempotent); whether
+    # sealed creds are *consumed* is a separate concern handled by remote config.
+    # Gating registration on config_source left a local-config agent unable to use
+    # the vault even with agent_key_path set — contradicting the UI's own guidance
+    # ("deploy the agent with agent_key_path set, then reload").
+    if public_key:
         _register_agent_key(config, public_key)
     config = _apply_remote_config(config, unseal)
     daemon = Daemon(config, dry_run=dry_run, unseal=unseal)
