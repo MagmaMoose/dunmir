@@ -397,21 +397,21 @@ admin.post("/commands", async (c) => {
 admin.get("/commands/:id/artifact", async (c) => {
   const id = c.req.param("id");
   const tenantId = c.get("tenantId")!;
+  // Read the (tenant-scoped) artifact, THEN null it — two statements rather than
+  // a single UPDATE…RETURNING. A self-referencing CTE (`RETURNING (SELECT … FROM
+  // old)`) re-evaluates `old` AFTER the row is nulled on modern SQLite, so it
+  // returns NULL and the body is lost (MATERIALIZED doesn't help). The purge is
+  // still guarded by `artifact IS NOT NULL` so a re-read can't re-serve it.
   const row = await c.env.DB.prepare(
-    `WITH old AS (
-       SELECT artifact FROM commands
-        WHERE id = ?1 AND artifact IS NOT NULL
-          AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)
-     )
-     UPDATE commands SET artifact = NULL
-     WHERE id = ?1 AND artifact IS NOT NULL
-       AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)
-     RETURNING (SELECT artifact FROM old) AS artifact`
+    `SELECT artifact FROM commands
+       WHERE id = ?1 AND artifact IS NOT NULL
+         AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)`,
   )
     .bind(id, tenantId)
     .first<{ artifact: string | null }>();
   if (!row || row.artifact === null) {
-    // Either the row doesn't exist, or artifact was already NULL (already downloaded)
+    // Either the row doesn't exist (for this tenant), or artifact was already
+    // NULL (already downloaded).
     const cmd = await c.env.DB.prepare(
       "SELECT id, status FROM commands WHERE id = ?1 AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)",
     )
@@ -423,6 +423,14 @@ admin.get("/commands/:id/artifact", async (c) => {
     }
     return c.json({ error: "no artifact — already downloaded, or none produced" }, 410);
   }
+  // Purge on read — scoped + guarded so it only ever clears this tenant's row.
+  await c.env.DB.prepare(
+    `UPDATE commands SET artifact = NULL
+       WHERE id = ?1 AND artifact IS NOT NULL
+         AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)`,
+  )
+    .bind(id, tenantId)
+    .run();
   return c.text(row.artifact, 200, {
     "content-type": "text/plain; charset=utf-8",
     "Cache-Control": "no-store",
