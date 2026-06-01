@@ -117,12 +117,15 @@ describe("multi-tenant admin isolation", () => {
     const cmdRow = db.prepare("SELECT artifact FROM commands WHERE id = ?").get(FX.cmdB) as { artifact: string | null };
     expect(cmdRow.artifact).toBe(FX.artifactB);
 
-    // A's own command passes the tenant gate (NOT 404/403). We don't assert the
-    // body here: the purge query returns it via a self-referencing CTE whose
-    // materialization differs across SQLite versions — orthogonal to isolation.
+    // A reads its OWN artifact: 200 + the body, delivered exactly once.
     const own = await call(env, `/v1/admin/commands/${FX.cmdA}/artifact`, { email: FX.emailA });
-    expect(own.status).not.toBe(404);
-    expect(own.status).not.toBe(403);
+    expect(own.status).toBe(200);
+    expect(await own.text()).toContain(FX.artifactA);
+    // Purged on read — a second fetch is 410 and the DB no longer holds it.
+    const again = await call(env, `/v1/admin/commands/${FX.cmdA}/artifact`, { email: FX.emailA });
+    expect(again.status).toBe(410);
+    const purged = db.prepare("SELECT artifact FROM commands WHERE id = ?").get(FX.cmdA) as { artifact: string | null };
+    expect(purged.artifact).toBeNull();
   });
 
   it("backup download is refused across tenants before any storage access", async () => {
