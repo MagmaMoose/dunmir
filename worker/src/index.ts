@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppContext, Env } from "./env";
 import admin from "./routes/admin";
 import ingest from "./routes/ingest";
+import tenants from "./routes/tenants";
 import { runScheduledSweep } from "./scheduled";
 
 const app = new Hono<AppContext>();
@@ -31,6 +32,8 @@ app.get("/v1/health", (c) => c.json({ ok: true, service: "mikrotik-minder" }));
 
 app.route("/v1/ingest", ingest);
 app.route("/v1/admin", admin);
+// Cross-tenant superadmin (tenant lifecycle); gated by SUPERADMIN_EMAILS.
+app.route("/v1/superadmin/tenants", tenants);
 
 export default {
   fetch: app.fetch,
