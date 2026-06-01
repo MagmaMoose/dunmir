@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.18.0 (2026-06-01)
+
+### Features
+
+- **worker**: Accept customer Stytch sessions on /v1/admin/* (cutover)
+  ([#52](https://github.com/MagmaMoose/dunmir/pull/52),
+  [`64b48d5`](https://github.com/MagmaMoose/dunmir/commit/64b48d5ce981f11a2e47a55d19388648b3044033))
+
+
 ## v1.17.0 (2026-06-01)
 
 ### Bug Fixes
