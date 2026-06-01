@@ -2,6 +2,31 @@
 
 <!-- version list -->
 
+## v1.16.0 (2026-06-01)
+
+### Bug Fixes
+
+- **agent**: Register vault public key whenever agent_key_path is set
+  ([#49](https://github.com/MagmaMoose/mikrotik-minder/pull/49),
+  [`0cf6a33`](https://github.com/MagmaMoose/mikrotik-minder/commit/0cf6a330b626ad6cae07ad2cd5cd0454f3163107))
+
+### Features
+
+- **worker**: Audit_log table for the Pro operator audit log (migration 0009)
+  ([#49](https://github.com/MagmaMoose/mikrotik-minder/pull/49),
+  [`0cf6a33`](https://github.com/MagmaMoose/mikrotik-minder/commit/0cf6a330b626ad6cae07ad2cd5cd0454f3163107))
+
+- **worker**: Prune Pro audit_log after 90 days in the scheduled sweep
+  ([#49](https://github.com/MagmaMoose/mikrotik-minder/pull/49),
+  [`0cf6a33`](https://github.com/MagmaMoose/mikrotik-minder/commit/0cf6a330b626ad6cae07ad2cd5cd0454f3163107))
+
+### Testing
+
+- **worker**: Cross-tenant isolation suite + sensitive-export artifact purge fix (multi-tenancy
+  phase 4) ([#43](https://github.com/MagmaMoose/mikrotik-minder/pull/43),
+  [`df04ca3`](https://github.com/MagmaMoose/mikrotik-minder/commit/df04ca328d69204849c649fd89319fd4a7d15ffc))
+
+
 ## v1.15.0 (2026-06-01)
 
 ### Features
