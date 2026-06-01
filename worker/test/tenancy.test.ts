@@ -102,6 +102,9 @@ describe("multi-tenant admin isolation", () => {
       body: { device_id: FX.deviceA, kind: "backup" },
     });
     expect(own.status).toBe(201);
+
+    const afterOwnCount = (db.prepare("SELECT COUNT(*) as cnt FROM commands").get() as { cnt: number }).cnt;
+    expect(afterOwnCount).toBe(beforeCount + 1);
   });
 
   it("sensitive-export artifact cannot be read across tenants", async () => {
