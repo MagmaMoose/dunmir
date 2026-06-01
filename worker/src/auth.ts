@@ -54,6 +54,31 @@ export function requireAdmin() {
 }
 
 /**
+ * Cross-tenant superadmin: the admin token PLUS an X-Auth-Email listed in
+ * SUPERADMIN_EMAILS. Used for tenant lifecycle (create tenant, manage members),
+ * which must NOT be tenant-scoped. With SUPERADMIN_EMAILS unset, nobody is a
+ * superadmin (the tenant endpoints are inert) — so single-tenant deploys are
+ * unaffected.
+ */
+export function requireSuperadmin() {
+  return async (c: Context<AppContext>, next: Next) => {
+    const token = extractBearer(c);
+    if (!token || !c.env.ADMIN_TOKEN || !constantTimeEqual(token, c.env.ADMIN_TOKEN)) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    const allowed = (c.env.SUPERADMIN_EMAILS ?? "")
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    const email = (c.req.header("X-Auth-Email") ?? "").trim().toLowerCase();
+    if (!email || !allowed.includes(email)) {
+      return c.json({ error: "superadmin only" }, 403);
+    }
+    await next();
+  };
+}
+
+/**
  * Resolve the tenant an admin request acts on. Single-tenant (the default) →
  * always the default tenant. Multi-tenant → the tenant the authenticated
  * operator email (X-Auth-Email, set by Cloudflare Access) is a member of;
