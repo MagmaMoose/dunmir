@@ -13,11 +13,29 @@ interface DeviceRow {
   grace_seconds: number | null;
 }
 
+// Keep operator audit entries (Pro's audit_log) for 90 days, then prune — the
+// table grows unbounded otherwise. Wrapped because the table only exists once
+// Pro's migration 0009 is applied; on an OSS-only deploy this is a harmless no-op.
+const AUDIT_RETENTION_SECONDS = 90 * 24 * 60 * 60;
+
+async function pruneAuditLog(env: Env, now: number): Promise<void> {
+  try {
+    await env.DB.prepare("DELETE FROM audit_log WHERE created_at < ?1")
+      .bind(now - AUDIT_RETENTION_SECONDS)
+      .run();
+  } catch {
+    // audit_log not present (migration 0009 unapplied) — nothing to prune.
+  }
+}
+
 export async function runScheduledSweep(env: Env, ctx: ExecutionContext): Promise<void> {
   const defaultInterval = numEnv(env.DEFAULT_HEARTBEAT_INTERVAL_SECONDS, 3600);
   // Grace can legitimately be 0 ("alert the moment we're past the interval").
   const defaultGrace = numEnv(env.DEFAULT_GRACE_SECONDS, 600, 0);
   const now = nowSeconds();
+
+  // Housekeeping first, so a later early-return can't skip it.
+  await pruneAuditLog(env, now);
 
   const { results } = await env.DB.prepare(
     `SELECT id, agent_id, name, site, last_seen_at, heartbeat_interval_seconds, grace_seconds
