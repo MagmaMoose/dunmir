@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.14.0 (2026-06-01)
+
+### Features
+
+- **worker**: Tenant-isolate alerts (multi-tenancy phase 2a)
+  ([#40](https://github.com/MagmaMoose/mikrotik-minder/pull/40),
+  [`d77cad9`](https://github.com/MagmaMoose/mikrotik-minder/commit/d77cad96edf7d0df1192f57b29df1eae2d488e86))
+
+- **worker**: Tenant-scope devices/commands/backups (multi-tenancy phase 2b)
+  ([#41](https://github.com/MagmaMoose/mikrotik-minder/pull/41),
+  [`d147a5f`](https://github.com/MagmaMoose/mikrotik-minder/commit/d147a5f8197aec27e0ccf4a119d844087b961986))
+
+
 ## v1.13.0 (2026-05-31)
 
 ### Features
