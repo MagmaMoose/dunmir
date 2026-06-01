@@ -1,5 +1,6 @@
 import type { Context, Next } from "hono";
 import { type AppContext, DEFAULT_TENANT_ID } from "./env";
+import { customerFromBearer } from "./stytch";
 
 const TOKEN_PREFIX = "mtm_";
 
@@ -41,6 +42,51 @@ export function requireAdmin() {
   return async (c: Context<AppContext>, next: Next) => {
     const token = extractBearer(c);
     if (!token || !c.env.ADMIN_TOKEN || !constantTimeEqual(token, c.env.ADMIN_TOKEN)) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    c.set("isAdmin", true);
+    const tenantId = await resolveTenant(c);
+    if (!tenantId) {
+      return c.json({ error: "no tenant for this operator" }, 403);
+    }
+    c.set("tenantId", tenantId);
+    await next();
+  };
+}
+
+/**
+ * Operator auth for the customer-facing admin API: a customer **Stytch session**
+ * (validated locally against the project JWKS → tenant + user) OR the shared
+ * **admin token** (superadmin / internal / pre-cutover Pro, scoped via
+ * X-Auth-Email). Tries the Stytch session first, so #51's validated identity
+ * gates real traffic; a JWT-shaped bearer that fails to validate is rejected and
+ * never falls through to the admin token. The admin-token path is retained so
+ * internal flows and the not-yet-migrated Pro app keep working during the SaaS
+ * migration. With STYTCH_JWKS_URL unset, this is exactly the old requireAdmin.
+ */
+export function requireOperator() {
+  return async (c: Context<AppContext>, next: Next) => {
+    const token = extractBearer(c);
+    if (!token) return c.json({ error: "unauthorized" }, 401);
+
+    // A Stytch session JWT has three dot-separated segments. When Stytch is
+    // configured, a JWT-shaped bearer is treated as a customer session.
+    if (c.env.STYTCH_JWKS_URL && token.split(".").length === 3) {
+      const auth = await customerFromBearer(token, c.env);
+      if (auth.ok) {
+        c.set("tenantId", auth.tenantId);
+        c.set("userId", auth.userId);
+        await next();
+        return;
+      }
+      // Valid session whose org isn't a tenant yet → 403; anything else → 401.
+      return auth.reason === "no-tenant"
+        ? c.json({ error: "organization is not provisioned" }, 403)
+        : c.json({ error: "unauthorized" }, 401);
+    }
+
+    // Otherwise: the shared admin token (superadmin / internal / pre-cutover Pro).
+    if (!c.env.ADMIN_TOKEN || !constantTimeEqual(token, c.env.ADMIN_TOKEN)) {
       return c.json({ error: "unauthorized" }, 401);
     }
     c.set("isAdmin", true);
