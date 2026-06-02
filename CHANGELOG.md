@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.19.4 (2026-06-02)
+
+### Bug Fixes
+
+- **worker**: Mark agents seen on any contact, not just heartbeats
+  ([`2ed5275`](https://github.com/MagmaMoose/dunmir/commit/2ed5275b50b32d57b57827e282a8a7b9febc2969))
+
+### Continuous Integration
+
+- **agent**: Publish the agent image as dunmir-agent
+  ([`e7a3720`](https://github.com/MagmaMoose/dunmir/commit/e7a3720cb44ea9ca3f4a3b41c8598b632fa85446))
+
+
 ## v1.19.3 (2026-06-02)
 
 ### Bug Fixes
