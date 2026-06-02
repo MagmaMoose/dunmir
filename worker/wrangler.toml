@@ -67,7 +67,11 @@ enabled = true
 # would deploy to a NEW worker called `mikrotik-minder-prod` (different URL,
 # missing the ADMIN_TOKEN secret bound to the live worker).
 [env.prod]
-name = "mikrotik-minder"
+# The hosted prod worker is "dunmir" — it owns the api.dunmir.magmamoose.com
+# custom domain and the prod secrets (ADMIN_TOKEN, SLACK_BOT_TOKEN). The repo was
+# renamed mikrotik-minder → dunmir; this name MUST match the domain-bound worker
+# or `deploy --env prod` ships to an orphan and api.dunmir serves stale code.
+name = "dunmir"
 account_id = "6e26afa31c37dee1dc82ad2f214f9b3c"
 
 [env.prod.triggers]
