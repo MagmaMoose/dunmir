@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.19.3 (2026-06-02)
+
+### Bug Fixes
+
+- **worker**: Deploy prod to the 'dunmir' worker, not 'mikrotik-minder'
+  ([`b0737f7`](https://github.com/MagmaMoose/dunmir/commit/b0737f7235bd5520b5b37c9650c3e9823d45b0de))
+
+
 ## v1.19.2 (2026-06-02)
 
 ### Bug Fixes
