@@ -50,17 +50,27 @@ async function signJwt(payload: Record<string, unknown>, kid = KID): Promise<str
   return `${input}.${b64url(new Uint8Array(sig))}`;
 }
 
-function validPayload(over: Record<string, unknown> = {}): Record<string, unknown> {
+// Mirrors the real Stytch B2B session-JWT shape: the org id lives under the
+// `https://stytch.com/organization` claim (NOT a flat claim), and the email only
+// inside the session's authentication factors. (A flat `organization_id` would
+// pass the old extractor but never appears in a real token.)
+function validPayload(
+  over: { organizationId?: string; sub?: string; email?: string; iat?: number; exp?: number } = {},
+): Record<string, unknown> {
   const now = Math.floor(Date.now() / 1000);
   return {
-    sub: MEMBER_ID,
+    sub: over.sub ?? MEMBER_ID,
     iss: ISSUER,
     aud: [PROJECT_ID],
-    iat: now,
-    exp: now + 3600,
-    organization_id: ORG_ID,
-    email_address: "alpha-user@a.example",
-    ...over,
+    iat: over.iat ?? now,
+    exp: over.exp ?? now + 3600,
+    "https://stytch.com/organization": { organization_id: over.organizationId ?? ORG_ID, slug: "acme" },
+    "https://stytch.com/session": {
+      id: "session-test-1",
+      authentication_factors: [
+        { type: "magic_link", delivery_method: "email", email_factor: { email_address: over.email ?? "alpha-user@a.example" } },
+      ],
+    },
   };
 }
 
@@ -130,7 +140,7 @@ describe("customer Stytch session auth (requireOperator)", () => {
     const res = await get(
       env,
       "/v1/admin/agents",
-      await signJwt(validPayload({ organization_id: "organization-test-ghost", sub: "member-ghost-1" })),
+      await signJwt(validPayload({ organizationId: "organization-test-ghost", sub: "member-ghost-1" })),
     );
     expect(res.status).toBe(200);
     // A fresh tenant was created for the new org…
