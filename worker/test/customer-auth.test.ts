@@ -125,10 +125,23 @@ describe("customer Stytch session auth (requireOperator)", () => {
     expect(mem).toBeTruthy();
   });
 
-  it("refuses a session for an unprovisioned org (403)", async () => {
-    const { env } = makeEnv();
-    const res = await get(env, "/v1/admin/agents", await signJwt(validPayload({ organization_id: "organization-test-ghost" })));
-    expect(res.status).toBe(403);
+  it("auto-provisions a fresh tenant for a new org (JIT onboarding)", async () => {
+    const { env, db } = makeEnv();
+    const res = await get(
+      env,
+      "/v1/admin/agents",
+      await signJwt(validPayload({ organization_id: "organization-test-ghost", sub: "member-ghost-1" })),
+    );
+    expect(res.status).toBe(200);
+    // A fresh tenant was created for the new org…
+    const tenant = db
+      .prepare("SELECT id FROM tenants WHERE stytch_org_id = ?")
+      .get("organization-test-ghost") as { id: string } | undefined;
+    expect(tenant).toBeTruthy();
+    // …and it sees neither A's nor B's fleet (a clean, empty dashboard).
+    const text = await res.text();
+    expect(text).not.toContain(FX.nameAgentA);
+    expect(text).not.toContain(FX.nameAgentB);
   });
 
   it("rejects a tampered token (401)", async () => {

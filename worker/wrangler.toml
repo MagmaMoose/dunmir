@@ -82,6 +82,14 @@ SLACK_SUCCESS_CHANNEL = "C0B5BJDHZTM"
 SLACK_FAILURE_CHANNEL = "C0A9FT7355Z"
 SLACK_INFO_CHANNEL = "C0A9RSQ3G92"
 PRO_UI_URL = "https://dunmir.magmamoose.com"
+# Stytch B2B customer auth — prod project (non-secret; the JWKS endpoint is
+# public). Lets the worker validate the session JWTs the Pro app forwards and
+# scope by the session's org. MULTI_TENANT=true so admin-token internal calls
+# scope too (the customer JWT path scopes by org regardless).
+STYTCH_PROJECT_ID = "project-live-1f529d6c-1a43-46c4-aa98-04b0e2faff89"
+STYTCH_JWKS_URL = "https://live.stytch.com/v1/sessions/jwks/project-live-1f529d6c-1a43-46c4-aa98-04b0e2faff89"
+STYTCH_ISSUER = "stytch.com/project-live-1f529d6c-1a43-46c4-aa98-04b0e2faff89"
+MULTI_TENANT = "true"
 
 [env.prod.observability]
 enabled = true
