@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.19.2 (2026-06-02)
+
+### Bug Fixes
+
+- **worker**: Correct prod Stytch JWKS URL to the B2B endpoint
+  ([`37b3a1f`](https://github.com/MagmaMoose/dunmir/commit/37b3a1f9d1c36f286fb7d99535d168d5ca354deb))
+
+
 ## v1.19.1 (2026-06-02)
 
 ### Bug Fixes
