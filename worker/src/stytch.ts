@@ -14,8 +14,8 @@
  *
  * Config (all NON-secret; per Stytch, derive from your project id + environment):
  *   STYTCH_PROJECT_ID — project-live-…                          (the JWT audience)
- *   STYTCH_JWKS_URL   — https://live.stytch.com/v1/sessions/jwks/<project_id>
- *                       (use test.stytch.com for a test project)
+ *   STYTCH_JWKS_URL   — https://api.stytch.com/v1/b2b/sessions/jwks/<project_id>
+ *                       (B2B path; test project → https://test.stytch.com/…)
  *   STYTCH_ISSUER     — stytch.com/<project_id>
  */
 import type { Context, Next } from "hono";
