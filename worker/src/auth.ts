@@ -1,5 +1,6 @@
 import type { Context, Next } from "hono";
 import { type AppContext, DEFAULT_TENANT_ID } from "./env";
+import { nowSeconds } from "./ids";
 import { customerFromBearer } from "./stytch";
 
 const TOKEN_PREFIX = "mtm_";
@@ -150,14 +151,23 @@ export function requireAgent() {
     }
     const hash = await hashToken(token);
     const row = await c.env.DB.prepare(
-      "SELECT id, disabled FROM agents WHERE token_hash = ?1 LIMIT 1",
+      "SELECT id, disabled, last_seen_at FROM agents WHERE token_hash = ?1 LIMIT 1",
     )
       .bind(hash)
-      .first<{ id: string; disabled: number }>();
+      .first<{ id: string; disabled: number; last_seen_at: number | null }>();
     if (!row || row.disabled) {
       return c.json({ error: "unauthorized" }, 401);
     }
     c.set("agentId", row.id);
+    // Liveness: ANY authenticated agent contact (config/commands poll, heartbeat,
+    // job report) marks the agent seen — so a connected agent shows as connected
+    // even before it owns a device. Throttled to ~once/min to bound D1 writes.
+    const now = nowSeconds();
+    if (!row.last_seen_at || now - row.last_seen_at >= 60) {
+      await c.env.DB.prepare("UPDATE agents SET last_seen_at = ?1 WHERE id = ?2")
+        .bind(now, row.id)
+        .run();
+    }
     await next();
   };
 }
