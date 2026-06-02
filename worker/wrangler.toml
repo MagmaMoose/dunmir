@@ -46,8 +46,8 @@ SLACK_INFO_CHANNEL = ""
 PRO_UI_URL = ""
 # Stytch B2B customer auth (#26). NON-SECRET — set these per deploy; do NOT commit
 # a customer's prod project id to this public repo. Derive from your project id:
-#   STYTCH_JWKS_URL = https://live.stytch.com/v1/sessions/jwks/<project_id>
-#                     (use test.stytch.com for a test project)
+#   STYTCH_JWKS_URL = https://api.stytch.com/v1/b2b/sessions/jwks/<project_id>
+#                     (B2B path; test project → https://test.stytch.com/...)
 #   STYTCH_ISSUER   = stytch.com/<project_id>
 # The Stytch API SECRET is NOT needed here — the worker validates JWTs locally via
 # JWKS (Web Crypto). The secret lives only in the Pro app's Pages secrets.
@@ -87,7 +87,7 @@ PRO_UI_URL = "https://dunmir.magmamoose.com"
 # scope by the session's org. MULTI_TENANT=true so admin-token internal calls
 # scope too (the customer JWT path scopes by org regardless).
 STYTCH_PROJECT_ID = "project-live-1f529d6c-1a43-46c4-aa98-04b0e2faff89"
-STYTCH_JWKS_URL = "https://live.stytch.com/v1/sessions/jwks/project-live-1f529d6c-1a43-46c4-aa98-04b0e2faff89"
+STYTCH_JWKS_URL = "https://api.stytch.com/v1/b2b/sessions/jwks/project-live-1f529d6c-1a43-46c4-aa98-04b0e2faff89"
 STYTCH_ISSUER = "stytch.com/project-live-1f529d6c-1a43-46c4-aa98-04b0e2faff89"
 MULTI_TENANT = "true"
 
