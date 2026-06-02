@@ -81,6 +81,21 @@ admin.post("/agents/:id/rotate-token", async (c) => {
   return c.json({ id, token });
 });
 
+// Delete an agent and ALL its devices (danger zone). Devices are removed first
+// so none dangle if FK enforcement is off; both statements are tenant-scoped.
+admin.delete("/agents/:id", async (c) => {
+  const id = c.req.param("id");
+  const tenantId = c.get("tenantId")!;
+  const results = await c.env.DB.batch([
+    c.env.DB.prepare(
+      "DELETE FROM devices WHERE agent_id = ?1 AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?2)",
+    ).bind(id, tenantId),
+    c.env.DB.prepare("DELETE FROM agents WHERE id = ?1 AND tenant_id = ?2").bind(id, tenantId),
+  ]);
+  if ((results[1]?.meta.changes ?? 0) === 0) return c.json({ error: "not found" }, 404);
+  return c.json({ ok: true });
+});
+
 // --- Devices --------------------------------------------------------------
 
 admin.post("/devices", async (c) => {
@@ -225,6 +240,36 @@ admin.delete("/devices/:id", async (c) => {
     .bind(c.req.param("id"), c.get("tenantId")!)
     .run();
   if ((res.meta.changes ?? 0) === 0) return c.json({ error: "not found" }, 404);
+  return c.json({ ok: true });
+});
+
+// Move a device to a different agent in the same tenant. The device keeps its id
+// (and history); only its owning agent changes.
+admin.post("/devices/:id/reassign", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => null);
+  const agentId = asString(body?.agent_id, "agent_id");
+  if (!agentId.ok) return c.json({ error: agentId.error }, 400);
+  const tenantId = c.get("tenantId")!;
+  const agent = await c.env.DB.prepare(
+    "SELECT id FROM agents WHERE id = ?1 AND tenant_id = ?2 AND disabled = 0",
+  )
+    .bind(agentId.value, tenantId)
+    .first();
+  if (!agent) return c.json({ error: "agent not found" }, 404);
+  try {
+    const res = await c.env.DB.prepare(
+      "UPDATE devices SET agent_id = ?1 WHERE id = ?2 AND agent_id IN (SELECT id FROM agents WHERE tenant_id = ?3)",
+    )
+      .bind(agentId.value, id, tenantId)
+      .run();
+    if ((res.meta.changes ?? 0) === 0) return c.json({ error: "device not found" }, 404);
+  } catch (err) {
+    if (String(err).includes("UNIQUE")) {
+      return c.json({ error: "that agent already has a device with this name" }, 409);
+    }
+    throw err;
+  }
   return c.json({ ok: true });
 });
 
