@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.20.0 (2026-06-02)
+
+### Features
+
+- **worker**: Delete-agent + reassign-device admin endpoints
+  ([`ddfbf7f`](https://github.com/MagmaMoose/dunmir/commit/ddfbf7ffa3c7d754b9c4be2b22489664450593a7))
+
+
 ## v1.19.4 (2026-06-02)
 
 ### Bug Fixes
