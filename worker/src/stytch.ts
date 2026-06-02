@@ -166,8 +166,7 @@ function pickString(p: JwtPayload, key: string): string | null {
   return null;
 }
 
-// The member email is carried only inside the session's authentication factors
-// (email_factor.email_address), not as a flat claim.
+// The member email is first checked as a direct claim (email_address), then falls back to inside the session's authentication factors (email_factor.email_address).
 function pickEmail(p: JwtPayload): string | null {
   const direct = pickString(p, "email_address");
   if (direct) return direct;
