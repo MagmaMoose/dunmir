@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.19.0 (2026-06-02)
+
+### Features
+
+- **worker**: JIT-provision a tenant for a new Stytch org (self-serve onboarding)
+  ([`aa8911d`](https://github.com/MagmaMoose/dunmir/commit/aa8911d1e1408d2936792a336807df37856bafe8))
+
+
 ## v1.18.0 (2026-06-01)
 
 ### Features
