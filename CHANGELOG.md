@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.19.1 (2026-06-02)
+
+### Bug Fixes
+
+- **worker**: Read organization_id from the Stytch B2B org claim
+  ([`bd75b9a`](https://github.com/MagmaMoose/dunmir/commit/bd75b9aa605465a1582fcd4a82b55af1693a6411))
+
+### Documentation
+
+- **worker**: Correct pickEmail doc to reflect direct claim fallback
+  ([`e6524c3`](https://github.com/MagmaMoose/dunmir/commit/e6524c3257e33066f01957dbed17cb0db52c3eb4))
+
+
 ## v1.19.0 (2026-06-02)
 
 ### Features
