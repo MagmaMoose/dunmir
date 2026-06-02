@@ -132,27 +132,51 @@ export async function validateStytchSession(token: string, env: Env): Promise<St
   if (!memberId || !organizationId) {
     throw new Error("session missing member (sub) or organization_id");
   }
-  return { memberId, organizationId, email: pickString(payload, "email_address") };
+  return { memberId, organizationId, email: pickEmail(payload) };
 }
 
 function audienceMatches(aud: unknown, projectId: string): boolean {
   return aud === projectId || (Array.isArray(aud) && aud.includes(projectId));
 }
 
-// Stytch B2B nests session data under this namespaced claim. The signature /
-// issuer / audience / expiry checks above are the security guarantee and hold
-// regardless of claim shape — this only affects which org/member we resolve, and
-// we fail closed when a claim is absent. VERIFY against a real token from your
-// project and adjust `pickString` if the shape differs.
+// Stytch B2B namespaced claims. The org id lives under .../organization (NOT the
+// session claim); the member id is the standard `sub`; the email is only inside
+// the session's authentication factors. The signature / issuer / audience /
+// expiry checks above are the security guarantee and hold regardless of claim
+// shape — these helpers only choose which org/member/email we resolve, and we
+// fail closed when a claim is absent. (Verified against stytch-node's
+// authenticateJwtLocal: organization_id ← "https://stytch.com/organization".)
 const STYTCH_SESSION_CLAIM = "https://stytch.com/session";
+const STYTCH_ORG_CLAIM = "https://stytch.com/organization";
 
+function claimObject(p: JwtPayload, ns: string): Record<string, unknown> | null {
+  const c = p[ns];
+  return c && typeof c === "object" ? (c as Record<string, unknown>) : null;
+}
+
+// Resolve a string claim: top-level first, then the org and session namespaced
+// claims (organization_id sits under the org claim in real B2B tokens).
 function pickString(p: JwtPayload, key: string): string | null {
   const top = p[key];
   if (typeof top === "string") return top;
-  const claim = p[STYTCH_SESSION_CLAIM];
-  if (claim && typeof claim === "object") {
-    const v = (claim as Record<string, unknown>)[key];
+  for (const ns of [STYTCH_ORG_CLAIM, STYTCH_SESSION_CLAIM]) {
+    const v = claimObject(p, ns)?.[key];
     if (typeof v === "string") return v;
+  }
+  return null;
+}
+
+// The member email is first checked as a direct claim (email_address), then falls back to inside the session's authentication factors (email_factor.email_address).
+function pickEmail(p: JwtPayload): string | null {
+  const direct = pickString(p, "email_address");
+  if (direct) return direct;
+  const factors = claimObject(p, STYTCH_SESSION_CLAIM)?.["authentication_factors"];
+  if (Array.isArray(factors)) {
+    for (const f of factors) {
+      const ef = f && typeof f === "object" ? (f as Record<string, unknown>)["email_factor"] : null;
+      const addr = ef && typeof ef === "object" ? (ef as Record<string, unknown>)["email_address"] : null;
+      if (typeof addr === "string") return addr;
+    }
   }
   return null;
 }
@@ -210,9 +234,9 @@ export async function customerFromBearer(token: string, env: Env): Promise<Custo
 
 /**
  * Map a validated Stytch session → local tenant + user, JIT-linking the member
- * to a local user + membership on first sight. The org→tenant link MUST already
- * exist (created during onboarding, Phase 2) — an unknown org is refused here,
- * never auto-provisioned, so a stray valid session can't mint itself a tenant.
+ * to a local user + membership on first sight. An org with no local tenant is
+ * provisioned one here (self-serve signup); the member who first touches it
+ * becomes its owner.
  */
 async function resolveCustomer(
   env: Env,
