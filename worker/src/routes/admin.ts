@@ -93,9 +93,14 @@ admin.post("/agents/:id/git-remote", async (c) => {
   const id = c.req.param("id");
   const tenantId = c.get("tenantId")!;
   const body = await c.req.json().catch(() => null);
+  if (body === null || typeof body !== "object") {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  const fields = body as Record<string, unknown>;
 
-  const rawUrl = body?.url;
-  if (rawUrl === null || rawUrl === undefined || rawUrl === "") {
+  // Clearing the remote must be EXPLICIT: `url` present and null/"". A missing or
+  // malformed body is a 400 — never a destructive clear of an absent field.
+  if ("url" in fields && (fields.url === null || fields.url === "")) {
     const res = await c.env.DB.prepare(
       `UPDATE agents SET git_remote_url = NULL, git_remote_branch = NULL,
          git_remote_token_sealed = NULL WHERE id = ?1 AND tenant_id = ?2`,
@@ -106,15 +111,16 @@ admin.post("/agents/:id/git-remote", async (c) => {
     return c.json({ ok: true, cleared: true });
   }
 
-  const url = asString(rawUrl, "url", { max: 500 });
+  const url = asString(fields.url, "url", { max: 500 });
   if (!url.ok) return c.json({ error: url.error }, 400);
-  if (!/^(https?:\/\/|ssh:\/\/|git@)/.test(url.value)) {
+  // https only (not http): a token must never be pushed over cleartext.
+  if (!/^(https:\/\/|ssh:\/\/|git@)/.test(url.value)) {
     return c.json({ error: "url must be an https://, ssh://, or git@ remote" }, 400);
   }
-  const branch = asOptionalString(body?.branch, "branch", { max: 100 });
+  const branch = asOptionalString(fields.branch, "branch", { max: 100 });
   if (!branch.ok) return c.json({ error: branch.error }, 400);
 
-  const sealed = body?.token_sealed;
+  const sealed = fields.token_sealed;
   if (sealed !== null && sealed !== undefined && typeof sealed !== "string") {
     return c.json({ error: "token_sealed must be a string or null" }, 400);
   }

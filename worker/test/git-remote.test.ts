@@ -117,6 +117,32 @@ describe("per-agent git remote", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects http:// (token must not go over cleartext)", async () => {
+    const res = await admin(env, `/v1/admin/agents/${FX.agentA}/git-remote`, {
+      method: "POST",
+      email: FX.emailA,
+      body: { url: "http://insecure.example/cfg.git" },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("a body with no url is a 400, not a destructive clear", async () => {
+    // First configure a remote, then send a malformed/empty body.
+    await admin(env, `/v1/admin/agents/${FX.agentA}/git-remote`, {
+      method: "POST",
+      email: FX.emailA,
+      body: { url: "https://git.example/cfg.git", token_sealed: "BLOB==" },
+    });
+    const res = await admin(env, `/v1/admin/agents/${FX.agentA}/git-remote`, {
+      method: "POST",
+      email: FX.emailA,
+      body: {}, // url absent ⇒ must NOT clear
+    });
+    expect(res.status).toBe(400);
+    const doc = await (await agentConfig(env)).json();
+    expect(doc.git.remote.url).toBe("https://git.example/cfg.git"); // still set
+  });
+
   it("is tenant-scoped — operator B cannot set agent A's remote", async () => {
     const res = await admin(env, `/v1/admin/agents/${FX.agentA}/git-remote`, {
       method: "POST",
