@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import stat
 import textwrap
 from pathlib import Path
 
@@ -124,6 +125,39 @@ def test_disable_via_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     cfg = _remote_config(tmp_path, monkeypatch)
     managed = with_managed_pipelines(cfg)
     assert managed.git is None and managed.backup is None
+
+
+def test_backup_password_file_is_0600(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    monkeypatch.setenv("DUNMIR_AGENT_STATE_DIR", str(state))
+    cfg = _remote_config(tmp_path, monkeypatch)
+    with_managed_pipelines(cfg)
+    mode = stat.S_IMODE((state / "backup-password").stat().st_mode)
+    assert mode == 0o600  # never briefly group/world-readable
+
+
+def test_explicit_intervals_are_not_overridden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An explicit export_interval requires a git section at parse time; backup is
+    # still auto-filled. The managed defaults must not clobber the explicit 900.
+    monkeypatch.setenv("DUNMIR_AGENT_STATE_DIR", str(tmp_path / "state"))
+    cfg = _remote_config(
+        tmp_path,
+        monkeypatch,
+        body="""
+        defaults:
+          export_interval_seconds: 900
+        git:
+          repo: /custom/configs
+        """,
+    )
+    managed = with_managed_pipelines(cfg)
+    assert managed.defaults.export_interval_seconds == 900  # kept, not overridden
+    assert managed.defaults.backup_interval_seconds == 24 * 60 * 60  # auto-filled
+    assert managed.backup is not None  # backup section was missing → filled
 
 
 def test_unwritable_state_dir_disables_pipelines_without_crashing(

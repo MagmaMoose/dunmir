@@ -172,10 +172,15 @@ class Daemon:
                 log.warning("config refresh failed (%s); keeping current config", exc)
                 continue
             fetched = build_devices(doc, unseal=self._unseal)
-            fetched_remote = build_git_remote(doc, unseal=self._unseal)
-            current_remote = self._config.git.remote if self._config.git else None
             devices_diff = devices_changed(self._config.devices, fetched)
-            remote_diff = git_remote_changed(current_remote, fetched_remote)
+            # Only a git-remote change matters when this agent actually HAS an
+            # export pipeline to push from. If managed pipelines are disabled
+            # (config.git is None — e.g. an unwritable state dir), ignore remote
+            # diffs so we don't restart-loop trying to apply something we can't.
+            remote_diff = False
+            if self._config.git is not None:
+                fetched_remote = build_git_remote(doc, unseal=self._unseal)
+                remote_diff = git_remote_changed(self._config.git.remote, fetched_remote)
             if devices_diff or remote_diff:
                 log.info(
                     "control-plane config changed (devices %s, git remote %s) — restarting",
@@ -349,7 +354,11 @@ class Daemon:
                     if result is None:
                         transport_kind = t.kind  # last tried, until something succeeds
                         error = str(exc)
-                    log.warning("device %s %s probe failed: %s", device.name, t.kind, exc)
+                    # Per-transport failures are expected steady state (e.g. SSH
+                    # intentionally blocked while API works) — debug, not warning,
+                    # so they don't flood the log every tick. A genuinely-down
+                    # device gets one WARNING below.
+                    log.debug("device %s %s probe failed: %s", device.name, t.kind, exc)
 
         finished = int(time.time())
         ok = result is not None
@@ -365,6 +374,10 @@ class Daemon:
                 f", identity {result.identity}" if result.identity else "",
                 result.latency_ms,
             )
+        elif not ok and not self._dry_run:
+            # One warning when the device is genuinely down (every transport failed),
+            # rather than one per failed transport above.
+            log.warning("device %s unreachable: %s", device.name, error or "all transports failed")
 
         # Optional packet-loss probe (router → ping_target), folded into the same
         # health_check report. Off unless a ping_target is configured, so we never

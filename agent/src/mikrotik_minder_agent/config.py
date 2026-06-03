@@ -527,23 +527,30 @@ def _managed_backup_password(state_dir: Path) -> str:
         pass
     state_dir.mkdir(parents=True, exist_ok=True)
     password = secrets.token_urlsafe(24)
-    pw_file.write_text(password + "\n")
+    # Create with 0600 from the start (O_EXCL + mode) so the secret is never
+    # briefly world/group-readable between write and chmod. If a partial/empty
+    # file is already there, replace it.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     try:
-        pw_file.chmod(0o600)
-    except OSError:  # pragma: no cover - non-POSIX fs
-        log.debug("could not chmod %s to 0600", pw_file)
+        fd = os.open(pw_file, flags, 0o600)
+    except FileExistsError:
+        pw_file.unlink()
+        fd = os.open(pw_file, flags, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(password + "\n")
     return password
 
 
 def with_managed_pipelines(config: AgentConfig) -> AgentConfig:
     """Return ``config`` with export + backup pipelines auto-enabled on the PVC.
 
-    Only for control-plane (``config_source == "remote"``) agents that haven't been
-    given explicit ``git`` / ``backup`` sections. A freshly-added device then exports
-    (with on-PVC drift history) and backs up on a sensible schedule out of the box;
-    the failure an unreachable device produces is the *real* transport error, not
-    "pipeline not configured". Local-mode (homelab) configs are returned untouched so
-    omitting a section still means "disabled".
+    Only for control-plane (``config_source == "remote"``) agents, and only for the
+    ``git`` / ``backup`` sections that weren't given explicitly — each missing one is
+    auto-filled on the PVC (an explicit section is always left as-is). A freshly-added
+    device then exports (with on-PVC drift history) and backs up on a sensible schedule
+    out of the box; the failure an unreachable device produces is the *real* transport
+    error, not "pipeline not configured". Local-mode (homelab) configs are returned
+    untouched so omitting a section still means "disabled".
     """
     if config.config_source != "remote" or not managed_pipelines_enabled():
         return config
@@ -581,13 +588,20 @@ def with_managed_pipelines(config: AgentConfig) -> AgentConfig:
             exc,
         )
         return config
+    # Fill the schedule only when unset (None). Use an explicit None check, not
+    # `or`, so a deliberately-configured interval is never overridden.
+    d = config.defaults
     defaults = replace(
-        config.defaults,
+        d,
         export_interval_seconds=(
-            config.defaults.export_interval_seconds or _MANAGED_EXPORT_INTERVAL_SECONDS
+            _MANAGED_EXPORT_INTERVAL_SECONDS
+            if d.export_interval_seconds is None
+            else d.export_interval_seconds
         ),
         backup_interval_seconds=(
-            config.defaults.backup_interval_seconds or _MANAGED_BACKUP_INTERVAL_SECONDS
+            _MANAGED_BACKUP_INTERVAL_SECONDS
+            if d.backup_interval_seconds is None
+            else d.backup_interval_seconds
         ),
     )
     return replace(config, git=git_cfg, backup=backup_cfg, defaults=defaults)
