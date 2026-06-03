@@ -31,7 +31,7 @@ from .export import ExportError, ExportResult, ExportRunner
 from .inventory import InventoryError, inventory_summary, run_inventory
 from .minder import CommandRef, JobReport, MinderClient, MinderError
 from .ping import PingError, run_ping
-from .remoteconfig import build_devices, devices_changed
+from .remoteconfig import build_devices, build_git_remote, devices_changed, git_remote_changed
 from .transports import ProbeResult, TransportError, build_transports
 from .updates import (
     UpdateCheckError,
@@ -167,15 +167,20 @@ class Daemon:
             return
         while not self._stop.wait(timeout=interval):
             try:
-                fetched = build_devices(minder.fetch_config(), unseal=self._unseal)
+                doc = minder.fetch_config()
             except MinderError as exc:
-                log.warning("config refresh failed (%s); keeping current devices", exc)
+                log.warning("config refresh failed (%s); keeping current config", exc)
                 continue
-            if devices_changed(self._config.devices, fetched):
+            fetched = build_devices(doc, unseal=self._unseal)
+            fetched_remote = build_git_remote(doc, unseal=self._unseal)
+            current_remote = self._config.git.remote if self._config.git else None
+            devices_diff = devices_changed(self._config.devices, fetched)
+            remote_diff = git_remote_changed(current_remote, fetched_remote)
+            if devices_diff or remote_diff:
                 log.info(
-                    "control-plane config changed (%d -> %d device(s)) — restarting to apply",
-                    len(self._config.devices),
-                    len(fetched),
+                    "control-plane config changed (devices %s, git remote %s) — restarting",
+                    "changed" if devices_diff else "same",
+                    "changed" if remote_diff else "same",
                 )
                 self._stop.set()
                 return
