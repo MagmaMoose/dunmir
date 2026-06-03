@@ -45,7 +45,10 @@ class APITransport:
                 username=self._device.username,
                 password=self._device.password or "",
                 port=self.port,
-                timeout=self._defaults.connect_timeout_seconds,
+                # librouteros uses this as the socket timeout for the connect AND
+                # the login handshake; a busy RouterOS can be slow to log in, so
+                # don't let the short TCP-connect default cut a healthy login off.
+                timeout=max(self._defaults.connect_timeout_seconds, 15.0),
             )
         except (TimeoutError, LibRouterosError, OSError) as exc:
             raise TransportError(f"API connect failed: {exc}") from exc
