@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.23.0 (2026-06-03)
+
+### Features
+
+- **agent**: Report RouterOS version + board over API (no SSH needed)
+  ([`77e6274`](https://github.com/MagmaMoose/dunmir/commit/77e62743cbee8491b97511eb20b0e7d0ee1c610d))
+
+
 ## v1.22.0 (2026-06-03)
 
 ### Features
