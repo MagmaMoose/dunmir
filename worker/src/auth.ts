@@ -164,8 +164,12 @@ export function requireAgent() {
     // even before it owns a device. Throttled to ~once/min to bound D1 writes.
     const now = nowSeconds();
     if (!row.last_seen_at || now - row.last_seen_at >= 60) {
-      await c.env.DB.prepare("UPDATE agents SET last_seen_at = ?1 WHERE id = ?2")
-        .bind(now, row.id)
+      // Also record the Cloudflare-observed egress IP here (not just on the
+      // per-device heartbeat) so it's populated even when the agent owns no
+      // probeable device yet — e.g. a router with no address configured.
+      const ip = c.req.header("cf-connecting-ip") ?? null;
+      await c.env.DB.prepare("UPDATE agents SET last_seen_at = ?1, last_ip = ?2 WHERE id = ?3")
+        .bind(now, ip, row.id)
         .run();
     }
     await next();
