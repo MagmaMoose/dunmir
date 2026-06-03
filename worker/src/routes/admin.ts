@@ -161,12 +161,21 @@ admin.post("/devices", async (c) => {
   const tagsJson = tags.value ? JSON.stringify(tags.value) : null;
 
   if (existing) {
+    // COALESCE(?, col): a field the caller OMITS (e.g. an empty input from a
+    // stale edit form) keeps its current value instead of being nulled. So
+    // editing one field can never silently wipe another. (To intentionally clear
+    // a field, that needs an explicit path — none of the UI forms clear these.)
     await c.env.DB.prepare(
-      `UPDATE devices SET site = ?1, role = ?2, tags = ?3,
-       heartbeat_interval_seconds = ?4, grace_seconds = ?5,
-       address = ?6, username = ?7, password_env = ?8, ssh_key_path = ?9,
-       transport_primary = ?10, transport_fallback = ?11,
-       api_port = ?12, use_tls = ?13, ssh_port = ?14, label = ?15
+      `UPDATE devices SET
+         site = COALESCE(?1, site), role = COALESCE(?2, role), tags = COALESCE(?3, tags),
+         heartbeat_interval_seconds = COALESCE(?4, heartbeat_interval_seconds),
+         grace_seconds = COALESCE(?5, grace_seconds),
+         address = COALESCE(?6, address), username = COALESCE(?7, username),
+         password_env = COALESCE(?8, password_env), ssh_key_path = COALESCE(?9, ssh_key_path),
+         transport_primary = COALESCE(?10, transport_primary),
+         transport_fallback = COALESCE(?11, transport_fallback),
+         api_port = COALESCE(?12, api_port), use_tls = COALESCE(?13, use_tls),
+         ssh_port = COALESCE(?14, ssh_port), label = COALESCE(?15, label)
        WHERE id = ?16`,
     )
       .bind(
