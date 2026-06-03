@@ -334,6 +334,17 @@ class Daemon:
         finished = int(time.time())
         ok = result is not None
         status_label = "ok" if ok else "down"
+        # Log the WINNING transport on success too — otherwise only failures show,
+        # which makes a healthy API probe invisible next to a failing SSH inventory.
+        if ok and result is not None and not self._dry_run:
+            log.info(
+                "device %s reachable via %s (RouterOS %s%s, %dms)",
+                device.name,
+                transport_kind,
+                result.version or "?",
+                f", identity {result.identity}" if result.identity else "",
+                result.latency_ms,
+            )
 
         # Optional packet-loss probe (router → ping_target), folded into the same
         # health_check report. Off unless a ping_target is configured, so we never
