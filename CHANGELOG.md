@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.21.0 (2026-06-03)
+
+### Features
+
+- **worker**: Record the agent's egress IP on heartbeat
+  ([`872aa06`](https://github.com/MagmaMoose/dunmir/commit/872aa0614fbba71b5a496baa2d304c889bf36a6a))
+
+
 ## v1.20.1 (2026-06-03)
 
 ### Bug Fixes
