@@ -155,9 +155,25 @@ def test_bad_auth_type_reports_allowed_methods_and_routeros_hint() -> None:
 
 
 def test_auth_failure_points_at_router_not_password() -> None:
-    # Method accepted, secret rejected — note it's the same credential the API uses.
+    # Password mode: secret rejected — note it's the same password the API uses.
     ns = _fake_paramiko_auth(lambda _bad, auth: auth("Authentication failed."))
-    t = SSHTransport(_device(), Defaults())
+    t = SSHTransport(_device(), Defaults())  # _device() has a password
+    msg = _raise_msg(t, ns)
+    assert "same password the API probe uses" in msg
+
+
+def test_auth_failure_with_key_only_does_not_claim_api_parity() -> None:
+    # Key-only mode: the API probe uses a password, so the "same credential" claim
+    # would be wrong — the message must stay accurate.
+    ns = _fake_paramiko_auth(lambda _bad, auth: auth("Authentication failed."))
+    dev = DeviceConfig(name="r", address="1.1.1.1", username="u", ssh_key_path="id_ed25519")
+    msg = _raise_msg(SSHTransport(dev, Defaults()), ns)
+    assert "an SSH key" in msg
+    assert "same password the API probe uses" not in msg
+    assert "independent" in msg
+
+
+def _raise_msg(transport: SSHTransport, ns) -> str:
     with pytest.raises(TransportError) as ei:
-        t._open_session(ns)
-    assert "the API probe uses" in str(ei.value)
+        transport._open_session(ns)
+    return str(ei.value)
