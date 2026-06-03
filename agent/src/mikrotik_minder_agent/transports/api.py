@@ -55,7 +55,9 @@ class APITransport:
 
         try:
             identity = _first_value(api, "/system/identity/print", "name")
-            version = _first_value(api, "/system/resource/print", "version")
+            # One /system/resource row carries BOTH the RouterOS version and the
+            # board-name, so the API probe can report hardware too — no SSH needed.
+            resource = _first_row(api, "/system/resource/print")
         except (LibRouterosError, OSError) as exc:
             raise TransportError(f"API probe command failed: {exc}") from exc
         finally:
@@ -67,7 +69,8 @@ class APITransport:
         return ProbeResult(
             kind=self.kind,
             identity=identity,
-            version=version,
+            version=_str(resource.get("version")),
+            board=_str(resource.get("board-name")),
             latency_ms=int((time.monotonic() - start) * 1000),
         )
 
@@ -77,3 +80,13 @@ def _first_value(api: Any, command: str, key: str) -> str | None:
         if key in row:
             return str(row[key])
     return None
+
+
+def _first_row(api: Any, command: str) -> dict[str, Any]:
+    for row in api(cmd=command):
+        return dict(row)
+    return {}
+
+
+def _str(value: Any) -> str | None:
+    return None if value is None else str(value)

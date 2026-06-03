@@ -427,6 +427,8 @@ class Daemon:
             details["identity"] = result.identity
             details["version"] = result.version
             details["latency_ms"] = result.latency_ms
+            if result.board:
+                details["board"] = result.board
         if packet_loss_pct is not None:
             details["packet_loss_pct"] = packet_loss_pct
         if avg_rtt_ms is not None:

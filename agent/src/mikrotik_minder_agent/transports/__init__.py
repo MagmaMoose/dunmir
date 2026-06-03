@@ -23,6 +23,7 @@ class ProbeResult:
     identity: str | None
     version: str | None
     latency_ms: int
+    board: str | None = None   # RouterOS board-name; the API probe fills it, SSH leaves None
 
 
 class Transport(Protocol):
