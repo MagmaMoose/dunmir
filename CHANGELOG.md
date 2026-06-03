@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.20.1 (2026-06-03)
+
+### Bug Fixes
+
+- **agent**: SSH banner/auth (+ API login) timeouts too short for RouterOS
+  ([`c582d83`](https://github.com/MagmaMoose/dunmir/commit/c582d8315cf13cb1e7142299b1149b1bbda6b8aa))
+
+
 ## v1.20.0 (2026-06-02)
 
 ### Features
