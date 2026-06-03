@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.25.0 (2026-06-03)
+
+### Bug Fixes
+
+- **agent**: Keep SSH auth-failure messages accurate for key auth
+  ([`3ce1e53`](https://github.com/MagmaMoose/dunmir/commit/3ce1e53ecd6d1e0399aa874096b5e1b04aa1237c))
+
+### Features
+
+- **agent**: Explain SSH auth failures (method vs secret)
+  ([`3f72815`](https://github.com/MagmaMoose/dunmir/commit/3f7281545376dbd49dbe225d477051a7c411cf1a))
+
+
 ## v1.24.0 (2026-06-03)
 
 ### Bug Fixes
