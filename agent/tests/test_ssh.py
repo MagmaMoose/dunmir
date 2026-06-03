@@ -109,3 +109,55 @@ def test_open_session_pins_host_keys_when_configured(tmp_path: Path) -> None:
     t._open_session(_fake_paramiko(recorded))
     assert recorded["policy"] == "_TofuAddPolicy"
     assert recorded.get("saved") == str(kh)  # persisted for next-connect verification
+
+
+def _fake_paramiko_auth(exc_to_raise):
+    """Fake paramiko whose connect() raises a given auth exception."""
+
+    class SSHException(Exception):
+        pass
+
+    class AuthenticationException(SSHException):
+        pass
+
+    class BadAuthenticationType(AuthenticationException):
+        def __init__(self, message: str, allowed_types: list[str]) -> None:
+            super().__init__(message)
+            self.allowed_types = allowed_types
+
+    class FakeClient:
+        def set_missing_host_key_policy(self, policy) -> None:
+            pass
+
+        def connect(self, **kwargs) -> None:
+            raise exc_to_raise(BadAuthenticationType, AuthenticationException)
+
+        def close(self) -> None:
+            pass
+
+    ns = type("FakeParamiko", (), {})
+    ns.SSHClient = FakeClient
+    ns.SSHException = SSHException
+    ns.AuthenticationException = AuthenticationException
+    ns.BadAuthenticationType = BadAuthenticationType
+    return ns
+
+
+def test_bad_auth_type_reports_allowed_methods_and_routeros_hint() -> None:
+    # Router only offers publickey → we surface that + the RouterOS knob to check.
+    ns = _fake_paramiko_auth(lambda bad, _auth: bad("no password", ["publickey"]))
+    t = SSHTransport(_device(), Defaults())
+    with pytest.raises(TransportError) as ei:
+        t._open_session(ns)
+    msg = str(ei.value)
+    assert "publickey" in msg
+    assert "always-allow-password-login" in msg
+
+
+def test_auth_failure_points_at_router_not_password() -> None:
+    # Method accepted, secret rejected — note it's the same credential the API uses.
+    ns = _fake_paramiko_auth(lambda _bad, auth: auth("Authentication failed."))
+    t = SSHTransport(_device(), Defaults())
+    with pytest.raises(TransportError) as ei:
+        t._open_session(ns)
+    assert "the API probe uses" in str(ei.value)

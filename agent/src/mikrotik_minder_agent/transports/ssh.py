@@ -199,6 +199,30 @@ class SSHTransport:
             client.set_missing_host_key_policy(_WarnAcceptPolicy())  # type: ignore[arg-type]
         try:
             client.connect(**self._connect_kwargs)
+        except paramiko.BadAuthenticationType as exc:
+            # The router refused the auth METHOD we offered (not just the secret).
+            # Surfacing the methods it WILL accept turns an opaque "auth failed"
+            # into an actionable answer — e.g. a router that only lists 'publickey'
+            # is refusing password login (RouterOS /ip ssh always-allow-password-login).
+            allowed = ", ".join(getattr(exc, "allowed_types", []) or []) or "none"
+            sent = "an SSH key" if self._device.ssh_key_path else "a password"
+            raise TransportError(
+                f"SSH auth rejected for {self.username!r}: we sent {sent}, but this "
+                f"router only accepts [{allowed}] over SSH. If that's 'publickey', "
+                f"RouterOS is refusing password login — check `/ip ssh print` "
+                f"(always-allow-password-login) and `/user ssh-keys print`."
+            ) from exc
+        except paramiko.AuthenticationException as exc:
+            # The method was accepted but the secret was rejected. This is the SAME
+            # credential the API probe uses, so when the API probe succeeds, an SSH
+            # rejection here is almost always router-side (SSH service/user policy),
+            # not a wrong password.
+            sent = "an SSH key" if self._device.ssh_key_path else "a password"
+            raise TransportError(
+                f"SSH authentication failed for {self.username!r} via {sent} — the "
+                f"same credential the API probe uses, so if API works this is "
+                f"router-side, not a bad password: {exc}"
+            ) from exc
         except (TimeoutError, paramiko.SSHException, OSError) as exc:
             raise TransportError(f"SSH connect failed: {exc}") from exc
         if kh:
