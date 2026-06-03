@@ -25,6 +25,7 @@ from .config import (
     inventory_check_interval,
     ping_target,
     update_check_interval,
+    with_managed_pipelines,
 )
 from .export import ExportError, ExportResult, ExportRunner
 from .inventory import InventoryError, inventory_summary, run_inventory
@@ -74,6 +75,9 @@ class Daemon:
         dry_run: bool = False,
         unseal: Callable[[str], str] | None = None,
     ) -> None:
+        # Control-plane agents get PVC-backed export + backup pipelines so a
+        # freshly-added device is captured and backed up with no extra config.
+        config = with_managed_pipelines(config)
         self._config = config
         self._dry_run = dry_run
         self._unseal = unseal  # decrypts sealed (vault) credentials on config refresh
@@ -311,6 +315,9 @@ class Daemon:
         result: ProbeResult | None = None
         error: str | None = None
         transport_kind = "none"
+        # Per-transport probe outcome (api/ssh) so the UI can show a status light
+        # for each, not just the winner. kind -> (ProbeResult | None, reason | None).
+        probes: dict[str, tuple[ProbeResult | None, str | None]] = {}
 
         if self._dry_run:
             transport_kind = "dry"
@@ -321,14 +328,22 @@ class Daemon:
             except TransportError as exc:
                 error = str(exc)
                 transports = []
+            # Probe every configured transport (not just until the first success) so
+            # both API and SSH report a reachable/failed status each tick. The first
+            # success — primary first — still wins for the device's identity/version.
             for t in transports:
-                transport_kind = t.kind  # remember the last one we tried
                 try:
-                    result = t.probe()
-                    error = None
-                    break
+                    probe = t.probe()
+                    probes[t.kind] = (probe, None)
+                    if result is None:
+                        result = probe
+                        transport_kind = t.kind
+                        error = None
                 except TransportError as exc:
-                    error = str(exc)
+                    probes[t.kind] = (None, str(exc))
+                    if result is None:
+                        transport_kind = t.kind  # last tried, until something succeeds
+                        error = str(exc)
                     log.warning("device %s %s probe failed: %s", device.name, t.kind, exc)
 
         finished = int(time.time())
@@ -374,6 +389,7 @@ class Daemon:
             finished=finished,
             packet_loss_pct=packet_loss_pct,
             avg_rtt_ms=avg_rtt_ms,
+            probes=probes,
         )
 
         # Only attempt heavier jobs when the device responded — no point hammering a down router.
@@ -403,6 +419,7 @@ class Daemon:
         finished: int,
         packet_loss_pct: float | None = None,
         avg_rtt_ms: float | None = None,
+        probes: dict[str, tuple[ProbeResult | None, str | None]] | None = None,
     ) -> bool:
         state = self._state[device.name]
         with state.lock:
@@ -429,6 +446,25 @@ class Daemon:
             details["latency_ms"] = result.latency_ms
             if result.board:
                 details["board"] = result.board
+            if result.routerboard is not None:
+                rb = result.routerboard
+                details["routerboard"] = {
+                    "model": rb.model,
+                    "serial": rb.serial,
+                    "current_firmware": rb.current_firmware,
+                    "upgrade_firmware": rb.upgrade_firmware,
+                    "mismatch": rb.mismatch,
+                }
+        if probes:
+            # Per-transport reachability so the UI shows an API and an SSH light.
+            details["transports"] = {
+                kind: {
+                    "ok": probe is not None,
+                    "latency_ms": probe.latency_ms if probe is not None else None,
+                    "reason": reason,
+                }
+                for kind, (probe, reason) in probes.items()
+            }
         if packet_loss_pct is not None:
             details["packet_loss_pct"] = packet_loss_pct
         if avg_rtt_ms is not None:

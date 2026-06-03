@@ -6,12 +6,16 @@ config file matches what operators have already drafted from the design doc.
 
 from __future__ import annotations
 
+import logging
 import os
-from dataclasses import dataclass, field
+import secrets
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+log = logging.getLogger(__name__)
 
 
 class ConfigError(ValueError):
@@ -470,3 +474,99 @@ def ping_target(device: DeviceConfig, defaults: Defaults) -> str | None:
 
 def effective_transport(device: DeviceConfig, defaults: Defaults) -> TransportPolicy:
     return device.transport or defaults.transport
+
+
+# --- Managed (zero-config) pipelines -------------------------------------------------------------
+#
+# A control-plane (config_source: remote) agent — i.e. the SaaS/Pro deployment — should capture and
+# back up every device the moment it's added, with no per-device git/backup section to author. We
+# achieve that by backing the export + backup pipelines with the agent's own persistent storage
+# (a PVC) when the operator hasn't configured them explicitly. The git *remote* (offsite history)
+# stays opt-in and is delivered per-device by the control plane (see remoteconfig.GitRemoteConfig).
+
+_DEFAULT_STATE_DIR = "/var/lib/dunmir-agent"
+_MANAGED_EXPORT_INTERVAL_SECONDS = 3600          # hourly /export capture + drift diff
+_MANAGED_BACKUP_INTERVAL_SECONDS = 24 * 60 * 60  # daily encrypted binary backup
+
+
+def agent_state_dir() -> Path:
+    """The agent's persistent working directory (a PVC in the cluster).
+
+    Overridable with ``DUNMIR_AGENT_STATE_DIR`` so the deployment can point it at
+    wherever the volume is actually mounted.
+    """
+    return Path(os.environ.get("DUNMIR_AGENT_STATE_DIR", _DEFAULT_STATE_DIR)).expanduser()
+
+
+def managed_pipelines_enabled() -> bool:
+    """Auto-enable PVC-backed pipelines unless explicitly turned off."""
+    return os.environ.get("DUNMIR_AGENT_MANAGED_PIPELINES", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def _managed_backup_password(state_dir: Path) -> str:
+    """Read — or generate once and persist — the backup encryption password.
+
+    The encrypted ``.backup`` bodies are uploaded to the control plane's R2, so they
+    must be encrypted with a key the operator's infrastructure holds rather than a
+    constant. We keep that key on the agent's PVC (0600), generate it on first use,
+    and reuse it thereafter so every backup for this agent decrypts with one key.
+    ``token_urlsafe`` yields ``[A-Za-z0-9_-]`` only — none of RouterOS's quote-hostile
+    characters (``"`` / ``\\``), so it's always a valid ``password=`` argument.
+    """
+    pw_file = state_dir / "backup-password"
+    try:
+        existing = pw_file.read_text().strip()
+        if existing:
+            return existing
+    except OSError:
+        pass
+    state_dir.mkdir(parents=True, exist_ok=True)
+    password = secrets.token_urlsafe(24)
+    pw_file.write_text(password + "\n")
+    try:
+        pw_file.chmod(0o600)
+    except OSError:  # pragma: no cover - non-POSIX fs
+        log.debug("could not chmod %s to 0600", pw_file)
+    return password
+
+
+def with_managed_pipelines(config: AgentConfig) -> AgentConfig:
+    """Return ``config`` with export + backup pipelines auto-enabled on the PVC.
+
+    Only for control-plane (``config_source == "remote"``) agents that haven't been
+    given explicit ``git`` / ``backup`` sections. A freshly-added device then exports
+    (with on-PVC drift history) and backs up on a sensible schedule out of the box;
+    the failure an unreachable device produces is the *real* transport error, not
+    "pipeline not configured". Local-mode (homelab) configs are returned untouched so
+    omitting a section still means "disabled".
+    """
+    if config.config_source != "remote" or not managed_pipelines_enabled():
+        return config
+    if config.git is not None and config.backup is not None:
+        return config
+
+    state_dir = agent_state_dir()
+    git_cfg = config.git or GitConfig(
+        repo=str(state_dir / "configs"),
+        author_name="dunmir-agent",
+        author_email="agent@dunmir.local",
+    )
+    backup_cfg = config.backup or BackupConfig(
+        dir=str(state_dir / "backups"),
+        password=_managed_backup_password(state_dir),
+    )
+    defaults = replace(
+        config.defaults,
+        export_interval_seconds=(
+            config.defaults.export_interval_seconds or _MANAGED_EXPORT_INTERVAL_SECONDS
+        ),
+        backup_interval_seconds=(
+            config.defaults.backup_interval_seconds or _MANAGED_BACKUP_INTERVAL_SECONDS
+        ),
+    )
+    return replace(config, git=git_cfg, backup=backup_cfg, defaults=defaults)
