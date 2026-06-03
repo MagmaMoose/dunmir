@@ -80,13 +80,19 @@ class SSHTransport:
 
     @property
     def _connect_kwargs(self) -> dict[str, Any]:
+        # RouterOS is often slow to emit its SSH banner (several seconds), so the
+        # banner + auth timeouts must NOT inherit the short TCP-connect timeout —
+        # a 5s connect_timeout was surfacing as "Error reading SSH protocol
+        # banner" on perfectly reachable routers. Keep the TCP connect snappy but
+        # be patient for the handshake (paramiko's own banner default is 15s).
+        handshake_timeout = max(self._defaults.connect_timeout_seconds, 30.0)
         kwargs: dict[str, Any] = {
             "hostname": self._device.address,
             "port": self.port,
             "username": self.username,
             "timeout": self._defaults.connect_timeout_seconds,
-            "auth_timeout": self._defaults.connect_timeout_seconds,
-            "banner_timeout": self._defaults.connect_timeout_seconds,
+            "auth_timeout": handshake_timeout,
+            "banner_timeout": handshake_timeout,
             "look_for_keys": False,
             "allow_agent": False,
         }
