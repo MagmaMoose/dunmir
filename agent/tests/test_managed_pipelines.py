@@ -124,3 +124,17 @@ def test_disable_via_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     cfg = _remote_config(tmp_path, monkeypatch)
     managed = with_managed_pipelines(cfg)
     assert managed.git is None and managed.backup is None
+
+
+def test_unwritable_state_dir_disables_pipelines_without_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A read-only container root fs (or a missing PVC) makes the state dir
+    # unwritable. Put it under a regular FILE so mkdir raises OSError — the daemon
+    # must degrade to no pipelines, not crash-loop.
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory")
+    monkeypatch.setenv("DUNMIR_AGENT_STATE_DIR", str(blocker / "state"))
+    cfg = _remote_config(tmp_path, monkeypatch)
+    managed = with_managed_pipelines(cfg)
+    assert managed.git is None and managed.backup is None

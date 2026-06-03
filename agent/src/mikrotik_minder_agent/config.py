@@ -551,15 +551,36 @@ def with_managed_pipelines(config: AgentConfig) -> AgentConfig:
         return config
 
     state_dir = agent_state_dir()
-    git_cfg = config.git or GitConfig(
-        repo=str(state_dir / "configs"),
-        author_name="dunmir-agent",
-        author_email="agent@dunmir.local",
-    )
-    backup_cfg = config.backup or BackupConfig(
-        dir=str(state_dir / "backups"),
-        password=_managed_backup_password(state_dir),
-    )
+    git_cfg = config.git
+    backup_cfg = config.backup
+    # The pipelines need a writable, persistent state dir. The container root fs is
+    # typically read-only, so the state dir MUST be a mounted volume (PVC) — point
+    # DUNMIR_AGENT_STATE_DIR at it. If it isn't writable, disable the managed
+    # pipelines and keep running rather than crash-looping the daemon. (And never
+    # use an ephemeral path: the backup key would regenerate each restart, leaving
+    # earlier encrypted backups undecryptable.)
+    try:
+        if git_cfg is None or backup_cfg is None:
+            state_dir.mkdir(parents=True, exist_ok=True)
+        if git_cfg is None:
+            git_cfg = GitConfig(
+                repo=str(state_dir / "configs"),
+                author_name="dunmir-agent",
+                author_email="agent@dunmir.local",
+            )
+        if backup_cfg is None:
+            backup_cfg = BackupConfig(
+                dir=str(state_dir / "backups"),
+                password=_managed_backup_password(state_dir),
+            )
+    except OSError as exc:
+        log.warning(
+            "managed pipelines disabled: state dir %s is not writable (%s) — point "
+            "DUNMIR_AGENT_STATE_DIR at a writable volume (a PVC)",
+            state_dir,
+            exc,
+        )
+        return config
     defaults = replace(
         config.defaults,
         export_interval_seconds=(
