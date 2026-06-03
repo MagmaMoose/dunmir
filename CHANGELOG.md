@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.21.2 (2026-06-03)
+
+### Bug Fixes
+
+- **worker**: Device edit keeps omitted fields (COALESCE), no clobber
+  ([`4897603`](https://github.com/MagmaMoose/dunmir/commit/48976034599bef36ee62ed40f38fffb35fc4bdc9))
+
+
 ## v1.21.1 (2026-06-03)
 
 ### Bug Fixes
