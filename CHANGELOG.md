@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.21.1 (2026-06-03)
+
+### Bug Fixes
+
+- **worker**: Stamp agent egress IP on every contact, not just heartbeat
+  ([`9c404a5`](https://github.com/MagmaMoose/dunmir/commit/9c404a58c6f48e1c8387d7203f510144c653c206))
+
+
 ## v1.21.0 (2026-06-03)
 
 ### Features
