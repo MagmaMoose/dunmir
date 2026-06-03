@@ -61,7 +61,12 @@ ingest.post("/heartbeat", async (c) => {
   )
     .bind(now, status, statusChanged ? 1 : 0, dev.id)
     .run();
-  await c.env.DB.prepare("UPDATE agents SET last_seen_at = ?1 WHERE id = ?2").bind(now, agentId).run();
+  // Record the agent's egress IP (Cloudflare-observed source) so operators can
+  // see what to allow on a router firewall without shelling into the agent.
+  const agentIp = c.req.header("cf-connecting-ip") ?? null;
+  await c.env.DB.prepare("UPDATE agents SET last_seen_at = ?1, last_ip = ?2 WHERE id = ?3")
+    .bind(now, agentIp, agentId)
+    .run();
 
   if (dev.previous_status === "down" && status !== "down") {
     await fireAlert(
