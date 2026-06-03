@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.22.0 (2026-06-03)
+
+### Features
+
+- **agent**: Log the winning transport + RouterOS version on success
+  ([`42d1506`](https://github.com/MagmaMoose/dunmir/commit/42d15066d8f19e79a40b909f3f00e6f9539e4b9e))
+
+
 ## v1.21.2 (2026-06-03)
 
 ### Bug Fixes
