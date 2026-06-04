@@ -1,0 +1,70 @@
+# Local / Docker stack: Postgres + FastAPI backend + React frontend.
+#
+#   ADMIN_TOKEN=mtm_local_dev docker compose up --build
+#
+# Backend on :8000 (Postgres + filesystem backups), frontend on :8080.
+# Cloudflare remains the first-class hosting target (D1 + Pages); this stack is the
+# portable path for local testing, Docker, and as a template for k8s.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: minder
+      POSTGRES_PASSWORD: minder
+      POSTGRES_DB: minder
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minder -d minder"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./worker
+    environment:
+      DATABASE_URL: postgresql://minder:minder@db:5432/minder
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token-change-me}
+      BACKUP_DIR: /var/lib/minder/backups
+      DEFAULT_HEARTBEAT_INTERVAL_SECONDS: "3600"
+      DEFAULT_GRACE_SECONDS: "600"
+      # MULTI_TENANT left unset → single-tenant (tnt_default), like a self-host D1.
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - backups:/var/lib/minder/backups
+    ports:
+      - "8000:8000"
+
+  # Dead-man sweep (the Cloudflare cron equivalent). Loops every 60s in dev; in
+  # k8s this is a CronJob (see deploy/k8s/20-backend.yaml).
+  sweep:
+    build:
+      context: ./worker
+    entrypoint: ["/bin/sh", "-c", "while true; do python -m sweep || true; sleep 60; done"]
+    environment:
+      DATABASE_URL: postgresql://minder:minder@db:5432/minder
+      DEFAULT_HEARTBEAT_INTERVAL_SECONDS: "3600"
+      DEFAULT_GRACE_SECONDS: "600"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      # Browser talks to the host-published backend port.
+      API_BASE: http://localhost:8000
+    depends_on:
+      - backend
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata: {}
+  backups: {}

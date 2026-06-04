@@ -7,7 +7,9 @@ entrypoint (``entry.py``) serves; the cron handler lives in ``scheduled.py``.
 
 from __future__ import annotations
 
+import os
 import traceback
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -15,7 +17,24 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from routes import admin, ingest, tenants
 
-app = FastAPI(title="mikrotik-minder", redirect_slashes=False)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Standalone (Docker / k8s / local): build the Postgres-backed environment once
+    # and hold it on app.state. On Cloudflare the env arrives per-request in the ASGI
+    # scope and DATABASE_URL is unset, so this is a no-op there.
+    env = None
+    if os.environ.get("DATABASE_URL"):
+        from env import StandaloneEnv
+
+        env = await StandaloneEnv.create()
+        app.state.env = env
+    yield
+    if env is not None:
+        await env.close()
+
+
+app = FastAPI(title="mikrotik-minder", redirect_slashes=False, lifespan=lifespan)
 
 app.include_router(ingest.router)
 app.include_router(admin.router)

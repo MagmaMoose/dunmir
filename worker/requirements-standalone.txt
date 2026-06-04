@@ -1,0 +1,8 @@
+# Runtime deps for the portable (Docker / k8s / local) deployment — the FastAPI
+# app served by uvicorn against Postgres. The Cloudflare Python Worker uses
+# `requirements.txt` instead (only `fastapi`; the runtime supplies the rest).
+fastapi
+uvicorn[standard]
+asyncpg
+httpx
+cryptography

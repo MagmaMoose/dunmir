@@ -9,3 +9,6 @@ requires-python = ">=3.11"
 # `src` on the path so tests import the app modules; `tests` holds the SQLite shim.
 pythonpath = ["src", "tests"]
 testpaths = ["tests"]
+# Async tests (the gated Postgres integration suite) run under pytest-asyncio's
+# auto mode; the sync TestClient suites are unaffected.
+asyncio_mode = "auto"

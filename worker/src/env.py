@@ -20,7 +20,7 @@ DEFAULT_TENANT_ID = "tnt_default"
 
 
 class Env:
-    """Production environment backed by the Cloudflare ``env`` JS object."""
+    """Production environment backed by the Cloudflare ``env`` JS object (D1 + R2)."""
 
     def __init__(self, raw: Any):
         self._raw = raw
@@ -32,6 +32,38 @@ class Env:
         if value is None:
             return default
         return str(value)
+
+
+class StandaloneEnv:
+    """Portable environment for Docker / k8s / local: FastAPI under uvicorn talking
+    to Postgres + filesystem storage. Config comes from process environment vars."""
+
+    def __init__(self, db: Any, backups: Any):
+        self.db = db
+        self.backups = backups
+
+    @classmethod
+    async def create(cls) -> "StandaloneEnv":
+        import os
+
+        from pg import PgDatabase
+        from storage_fs import FilesystemStorage
+
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            raise RuntimeError("DATABASE_URL is required to run the backend outside Cloudflare")
+        db = await PgDatabase.connect(dsn)
+        backups = FilesystemStorage(os.environ.get("BACKUP_DIR", "/var/lib/minder/backups"))
+        return cls(db, backups)
+
+    def get(self, name: str, default: str | None = None) -> str | None:
+        import os
+
+        value = os.environ.get(name)
+        return value if value is not None else default
+
+    async def close(self) -> None:
+        await self.db.close()
 
 
 def num_env(value: str | None, fallback: int, minimum: int = 1) -> int:

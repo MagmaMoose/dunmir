@@ -31,6 +31,25 @@ The control plane is **hosted publicly at `https://mikrotik-minder.sargeant.work
 
 If you'd rather self-host the worker (separate Cloudflare account, your own D1, your own admin token), the code under [`worker/`](worker/) is fully self-contained — see [`worker/wrangler.toml`](worker/wrangler.toml) and the [`worker-deploy.yml`](.github/workflows/worker-deploy.yml) workflow for the deploy shape. The agent doesn't care whether it points at our hosted endpoint or your own; the URL is a config field.
 
+### Portable deployment (Postgres / Docker / Kubernetes)
+
+Cloudflare (D1 + Pages) is the **first-class** target, but the backend is a single
+FastAPI codebase that also runs as an ordinary process against **Postgres** —
+locally, in Docker, or on Kubernetes — and there's a TypeScript/React operator
+dashboard in [`frontend/`](frontend/). Same app, same SQL; the database/storage/HTTP
+adapters are swapped by runtime (see [`worker/README.md`](worker/README.md)).
+
+```bash
+# Whole stack locally (Postgres + FastAPI backend + React frontend):
+ADMIN_TOKEN=mtm_local_dev docker compose up --build
+#   backend → http://localhost:8000   frontend → http://localhost:8080
+```
+
+Kubernetes manifests are in [`deploy/k8s/`](deploy/k8s/); the backend image
+(`worker/Dockerfile`) applies Postgres migrations on boot and a `CronJob` runs the
+dead-man sweep. The frontend deploys to Cloudflare Pages (build `frontend/`, output
+`dist/`) or as the nginx image in `frontend/Dockerfile`.
+
 ## Quickstart
 
 ```bash

@@ -16,7 +16,7 @@ from auth import OperatorAuth, generate_agent_token, hash_token, require_operato
 from bodies import MISSING, field, json_body
 from deps import get_env
 from env import Env
-from errors import http_error
+from errors import http_error, is_unique_violation
 from ids import new_id, now_seconds
 from notify import fire_alert
 from schema import (
@@ -60,7 +60,7 @@ async def create_agent(request: Request, auth: OperatorAuth = Depends(require_op
             "INSERT INTO agents (id, name, token_hash, created_at, tenant_id) VALUES (?1, ?2, ?3, ?4, ?5)"
         ).bind(agent_id, name.value, token_hash, now, auth.tenant_id).run()
     except Exception as err:  # noqa: BLE001
-        if "UNIQUE" in str(err):
+        if is_unique_violation(err):
             raise http_error(409, "agent name already exists")
         raise
     return JSONResponse({"id": agent_id, "name": name.value, "token": token, "created_at": now}, status_code=201)
@@ -336,7 +336,7 @@ async def reassign_device(id: str, request: Request, auth: OperatorAuth = Depend
         if res.changes == 0:
             raise http_error(404, "device not found")
     except Exception as err:  # noqa: BLE001
-        if "UNIQUE" in str(err):
+        if is_unique_violation(err):
             raise http_error(409, "that agent already has a device with this name")
         raise
     return {"ok": True}
@@ -401,7 +401,7 @@ async def create_alert_route(request: Request, auth: OperatorAuth = Depends(requ
             auth.tenant_id,
         ).run()
     except Exception as err:  # noqa: BLE001
-        if "UNIQUE" in str(err):
+        if is_unique_violation(err):
             raise http_error(409, "route name already exists")
         raise
     return JSONResponse({"id": route_id, "name": name.value}, status_code=201)

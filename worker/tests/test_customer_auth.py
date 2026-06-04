@@ -17,7 +17,6 @@ import json
 import time
 
 import pytest
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
@@ -71,18 +70,13 @@ def valid_payload(organization_id=ORG_ID, sub=MEMBER_ID, email="alpha-user@a.exa
 
 @pytest.fixture(autouse=True)
 def patch_crypto(monkeypatch):
+    # Stub only the JWKS *fetch* (no network); the real, portable CPython
+    # `_verify_rs256` (cryptography branch) runs against the returned key — so this
+    # exercises the actual signature-verification path used off-Cloudflare.
     async def fake_load_jwks(env):
         return {KID: _PUBLIC_KEY}
 
-    async def fake_verify(key, signing_input: bytes, signature: bytes) -> bool:
-        try:
-            key.verify(signature, signing_input, padding.PKCS1v15(), hashes.SHA256())
-            return True
-        except InvalidSignature:
-            return False
-
     monkeypatch.setattr(stytch, "_load_jwks", fake_load_jwks)
-    monkeypatch.setattr(stytch, "_verify_rs256", fake_verify)
 
 
 @pytest.fixture

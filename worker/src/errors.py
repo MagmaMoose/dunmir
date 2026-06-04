@@ -12,3 +12,15 @@ from fastapi import HTTPException
 
 def http_error(status: int, message: str) -> HTTPException:
     return HTTPException(status_code=status, detail=message)
+
+
+def is_unique_violation(err: Exception) -> bool:
+    """True if ``err`` is a unique-constraint violation, across DB dialects.
+
+    D1 / SQLite surfaces "UNIQUE constraint failed"; Postgres (asyncpg) raises
+    ``UniqueViolationError`` / "duplicate key value violates unique constraint".
+    """
+    if type(err).__name__ == "UniqueViolationError":
+        return True
+    text = str(err).lower()
+    return "unique constraint" in text or "duplicate key" in text

@@ -50,11 +50,21 @@ class StytchSession:
 # --- Crypto primitives (Workers Web Crypto; monkeypatched in tests) ----------
 
 
+def _on_workers() -> bool:
+    try:
+        import js  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 async def _load_jwks(env) -> dict[str, Any]:
     """Fetch + import the project JWKS, cached per process with a short TTL.
 
     Keys are imported as RSASSA-PKCS1-v1_5 / SHA-256 (RS256) — the only algorithm
-    Stytch signs with — so the algorithm is hard-pinned.
+    Stytch signs with — so the algorithm is hard-pinned. The import uses Web Crypto
+    on Workers and ``cryptography`` when running as an ordinary process.
     """
     global _jwks_cache
     jwks_url = env.get("STYTCH_JWKS_URL")
@@ -64,8 +74,6 @@ async def _load_jwks(env) -> dict[str, Any]:
     if _jwks_cache and _jwks_cache["url"] == jwks_url and now_ms - _jwks_cache["at"] < JWKS_TTL_MS:
         return _jwks_cache["keys"]
 
-    import js
-    from pyodide.ffi import to_js
     import outbound
 
     res = await outbound.fetch(jwks_url, headers={"accept": "application/json"})
@@ -76,30 +84,50 @@ async def _load_jwks(env) -> dict[str, Any]:
     for jwk in body.get("keys", []) or []:
         if jwk.get("kty") != "RSA" or not jwk.get("kid") or not jwk.get("n") or not jwk.get("e"):
             continue
+        keys[jwk["kid"]] = await _import_rsa_key(jwk["n"], jwk["e"])
+    _jwks_cache = {"url": jwks_url, "at": now_ms, "keys": keys}
+    return keys
+
+
+async def _import_rsa_key(n: str, e: str) -> Any:
+    if _on_workers():
+        import js
+        from pyodide.ffi import to_js
+
         jwk_js = to_js(
-            {"kty": "RSA", "n": jwk["n"], "e": jwk["e"], "alg": "RS256", "ext": True},
+            {"kty": "RSA", "n": n, "e": e, "alg": "RS256", "ext": True},
             dict_converter=js.Object.fromEntries,
         )
         algo = to_js({"name": "RSASSA-PKCS1-v1_5", "hash": "SHA-256"}, dict_converter=js.Object.fromEntries)
         usages = js.Array.new()
         usages.push("verify")
-        keys[jwk["kid"]] = await js.crypto.subtle.importKey("jwk", jwk_js, algo, False, usages)
-    _jwks_cache = {"url": jwks_url, "at": now_ms, "keys": keys}
-    return keys
+        return await js.crypto.subtle.importKey("jwk", jwk_js, algo, False, usages)
+
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    n_int = int.from_bytes(_b64url_to_bytes(n), "big")
+    e_int = int.from_bytes(_b64url_to_bytes(e), "big")
+    return rsa.RSAPublicNumbers(e_int, n_int).public_key()
 
 
 async def _verify_rs256(key: Any, signing_input: bytes, signature: bytes) -> bool:
-    import js
-    from pyodide.ffi import to_js
+    if _on_workers():
+        import js
+        from pyodide.ffi import to_js
 
-    return bool(
-        await js.crypto.subtle.verify(
-            "RSASSA-PKCS1-v1_5",
-            key,
-            to_js(signature),
-            to_js(signing_input),
+        return bool(
+            await js.crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, to_js(signature), to_js(signing_input))
         )
-    )
+
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    try:
+        key.verify(signature, signing_input, padding.PKCS1v15(), hashes.SHA256())
+        return True
+    except InvalidSignature:
+        return False
 
 
 # --- Validation + claim handling (pure) --------------------------------------
