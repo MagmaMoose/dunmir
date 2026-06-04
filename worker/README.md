@@ -80,6 +80,22 @@ For containers/k8s see the repo-root [`docker-compose.yml`](../docker-compose.ym
 and [`deploy/k8s/`](../deploy/k8s/). The `Dockerfile` here builds the portable image
 (migrations on boot, then uvicorn).
 
+## Moving the database (D1 ⇄ Postgres)
+
+Both backends share one schema, so moving a live database is a row copy.
+`transfer.py` does it in either direction (tables in FK-safe order, idempotent):
+
+```bash
+# Cloudflare D1 → Postgres
+wrangler d1 export minder --output dump.sql && sqlite3 d1.sqlite < dump.sql
+python -m migrate                       # ensure the Postgres schema exists
+python -m transfer sqlite:///d1.sqlite "$DATABASE_URL" --truncate
+
+# Postgres → Cloudflare D1
+python -m transfer "$DATABASE_URL" sqlite:///d1.sqlite --truncate
+sqlite3 d1.sqlite .dump | wrangler d1 execute minder --remote --file=/dev/stdin
+```
+
 ## Deploy (Cloudflare, first-class)
 
 CI (`.github/workflows/worker-deploy.yml`) applies D1 migrations and deploys to the
