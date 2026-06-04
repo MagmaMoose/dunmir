@@ -1,7 +1,9 @@
 name = "mikrotik-minder"
-main = "src/index.ts"
+main = "src/entry.py"
 compatibility_date = "2025-01-09"
-compatibility_flags = ["nodejs_compat"]
+# Python Workers runtime. FastAPI (ASGI) is served via the runtime's `asgi` helper;
+# packages are declared in requirements.txt and resolved from Cloudflare's index.
+compatibility_flags = ["python_workers"]
 workers_dev = true
 # No account_id here — safe for local dev and self-host.
 # The hosted production account is configured in [env.prod] below.

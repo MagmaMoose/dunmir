@@ -1,7 +1,7 @@
 # MikroTik Minder
 
 > **Implementation status (May 2026)** — The hosted control plane is live and the agent is shipping via Helm.
-> - **Hosted control plane**: [`https://mikrotik-minder.sargeant.workers.dev`](https://mikrotik-minder.sargeant.workers.dev) — Cloudflare Worker + D1. Heartbeat / job ingest, dead-man cron, Slack / Discord / generic webhook delivery. No public UI; the visual operator UX is a separate licensed product.
+> - **Hosted control plane**: [`https://mikrotik-minder.sargeant.workers.dev`](https://mikrotik-minder.sargeant.workers.dev) — FastAPI on a Cloudflare Python Worker + D1. Heartbeat / job ingest, dead-man cron, Slack / Discord / generic webhook delivery. No public UI; the visual operator UX is a separate licensed product.
 > - **Agent**: [Helm chart](charts/mikrotik-minder-agent/) backed by the Python daemon in [`agent/`](agent/). Probes RouterOS over API and/or SSH; reports heartbeats and job results to the control plane.
 >
 > Wire contract: [`docs/agent-protocol.md`](docs/agent-protocol.md). Source for the worker, in case you want to self-host: [`worker/`](worker/).

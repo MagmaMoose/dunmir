@@ -1,0 +1,4 @@
+# Cloudflare Python Workers package manifest. FastAPI (and its deps, incl. the
+# `asgi` Workers helper) are provided from the runtime's supported package set.
+# See: https://developers.cloudflare.com/workers/languages/python/packages/
+fastapi

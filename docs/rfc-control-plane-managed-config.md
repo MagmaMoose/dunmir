@@ -122,7 +122,7 @@ The Pro layer is **not** described in full here — only how it attaches:
 
 Both options leave this repo's worker untouched:
 
-1. **Open-core composition (recommended).** Publish this worker as a package exporting its Hono app + the `ConfigProvider` interface (default `RefConfigProvider`). The private Pro worker imports it, mounts proprietary routes (vault, tenant admin, licensing), injects `VaultConfigProvider`, and binds the same D1/R2. Deploy is the composed worker. No proxy hop.
+1. **Open-core composition (recommended).** Publish this worker as a package exporting its FastAPI app (its `APIRouter`s) + the `ConfigProvider` interface (default `RefConfigProvider`). The private Pro worker imports it, mounts proprietary routes (vault, tenant admin, licensing), injects `VaultConfigProvider`, and binds the same D1/R2. Deploy is the composed worker. No proxy hop.
 2. **Service-binding wrapper.** A Pro worker sits in front with a service binding to the unmodified OSS worker; it owns config/vault/tenancy and forwards `/v1/ingest/*` + `/v1/admin/*`. Stronger isolation, slight proxy overhead.
 
 Either way the SaaS reuses ingest / jobs / backups / alerts wholesale; the proprietary surface is just vault + tenancy + licensing.
