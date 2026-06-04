@@ -1,7 +1,7 @@
 # MikroTik Minder
 
 > **Implementation status (May 2026)** — The hosted control plane is live and the agent is shipping via Helm.
-> - **Hosted control plane**: [`https://mikrotik-minder.sargeant.workers.dev`](https://mikrotik-minder.sargeant.workers.dev) — Cloudflare Worker + D1. Heartbeat / job ingest, dead-man cron, Slack / Discord / generic webhook delivery. No public UI; the visual operator UX is a separate licensed product.
+> - **Hosted control plane**: [`https://mikrotik-minder.sargeant.workers.dev`](https://mikrotik-minder.sargeant.workers.dev) — FastAPI on a Cloudflare Python Worker + D1. Heartbeat / job ingest, dead-man cron, Slack / Discord / generic webhook delivery. No public UI; the visual operator UX is a separate licensed product.
 > - **Agent**: [Helm chart](charts/mikrotik-minder-agent/) backed by the Python daemon in [`agent/`](agent/). Probes RouterOS over API and/or SSH; reports heartbeats and job results to the control plane.
 >
 > Wire contract: [`docs/agent-protocol.md`](docs/agent-protocol.md). Source for the worker, in case you want to self-host: [`worker/`](worker/).
@@ -30,6 +30,25 @@ The agent does the privileged work — it lives on the operator's network and ta
 The control plane is **hosted publicly at `https://mikrotik-minder.sargeant.workers.dev`** — you don't have to deploy it yourself. You only run the agent in your own network. The hosted instance is single-tenant during the OSS preview; to get an agent token, [open an issue](https://github.com/magmamoose/mikrotik-minder/issues) or contact `caleb@magmamoose.com`.
 
 If you'd rather self-host the worker (separate Cloudflare account, your own D1, your own admin token), the code under [`worker/`](worker/) is fully self-contained — see [`worker/wrangler.toml`](worker/wrangler.toml) and the [`worker-deploy.yml`](.github/workflows/worker-deploy.yml) workflow for the deploy shape. The agent doesn't care whether it points at our hosted endpoint or your own; the URL is a config field.
+
+### Portable deployment (Postgres / Docker / Kubernetes)
+
+Cloudflare (D1 + Pages) is the **first-class** target, but the backend is a single
+FastAPI codebase that also runs as an ordinary process against **Postgres** —
+locally, in Docker, or on Kubernetes — and there's a TypeScript/React operator
+dashboard in [`frontend/`](frontend/). Same app, same SQL; the database/storage/HTTP
+adapters are swapped by runtime (see [`worker/README.md`](worker/README.md)).
+
+```bash
+# Whole stack locally (Postgres + FastAPI backend + React frontend):
+ADMIN_TOKEN=mtm_local_dev docker compose up --build
+#   backend → http://localhost:8000   frontend → http://localhost:8080
+```
+
+Kubernetes manifests are in [`deploy/k8s/`](deploy/k8s/); the backend image
+(`worker/Dockerfile`) applies Postgres migrations on boot and a `CronJob` runs the
+dead-man sweep. The frontend deploys to Cloudflare Pages (build `frontend/`, output
+`dist/`) or as the nginx image in `frontend/Dockerfile`.
 
 ## Quickstart
 

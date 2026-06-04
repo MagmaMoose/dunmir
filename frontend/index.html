@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mikrotik Minder</title>
+    <!--
+      Runtime config. In Docker this file is generated at container start by
+      docker-entrypoint.sh from the API_BASE env var. For local dev / static
+      hosting (e.g. Cloudflare Pages) it may be absent, which is fine: the app
+      falls back to the Vite build-time env (VITE_API_BASE) or the default.
+    -->
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

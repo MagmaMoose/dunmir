@@ -1,0 +1,29 @@
+# Optional ingress: frontend at the host root, backend under /v1. Requires an
+# ingress controller (nginx-ingress, Traefik, …). Adjust host + className.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minder
+  namespace: minder
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: minder.example.com
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: minder-backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minder-frontend
+                port:
+                  number: 80

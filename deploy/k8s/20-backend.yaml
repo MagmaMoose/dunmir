@@ -1,0 +1,158 @@
+# Backend: migration Job (owns schema) + Deployment (serves) + CronJob (dead-man
+# sweep, the Cloudflare-cron equivalent). Build/push the image from ./worker, or
+# `kind load` / `minikube image load` it for a local cluster.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minder-backend
+  namespace: minder
+type: Opaque
+stringData:
+  # CHANGE THESE before any real use.
+  POSTGRES_PASSWORD: "minder"
+  DATABASE_URL: "postgresql://minder:minder@postgres:5432/minder"
+  ADMIN_TOKEN: "change-me-to-a-long-random-string"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: minder-backend
+  namespace: minder
+data:
+  DEFAULT_HEARTBEAT_INTERVAL_SECONDS: "3600"
+  DEFAULT_GRACE_SECONDS: "600"
+  BACKUP_DIR: "/var/lib/minder/backups"
+  # MULTI_TENANT: "true"   # uncomment for multi-tenant (X-Auth-Email / Stytch)
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minder-backups
+  namespace: minder
+spec:
+  # Filesystem backup storage. For >1 backend replica this must be ReadWriteMany,
+  # or switch to object storage (S3/R2) — see worker/src/storage_fs.py.
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minder-migrate
+  namespace: minder
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: mikrotik-minder-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "migrate"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: minder-backend
+                  key: DATABASE_URL
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minder-backend
+  namespace: minder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minder-backend
+  template:
+    metadata:
+      labels:
+        app: minder-backend
+    spec:
+      containers:
+        - name: backend
+          image: mikrotik-minder-backend:latest
+          imagePullPolicy: IfNotPresent
+          # The migrate Job owns the schema; don't migrate per-replica.
+          env:
+            - name: RUN_MIGRATIONS
+              value: "false"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: minder-backend
+                  key: DATABASE_URL
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: minder-backend
+                  key: ADMIN_TOKEN
+          envFrom:
+            - configMapRef:
+                name: minder-backend
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: backups
+              mountPath: /var/lib/minder/backups
+      volumes:
+        - name: backups
+          persistentVolumeClaim:
+            claimName: minder-backups
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minder-backend
+  namespace: minder
+spec:
+  selector:
+    app: minder-backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: minder-sweep
+  namespace: minder
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sweep
+              image: mikrotik-minder-backend:latest
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "sweep"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: minder-backend
+                      key: DATABASE_URL
+              envFrom:
+                - configMapRef:
+                    name: minder-backend

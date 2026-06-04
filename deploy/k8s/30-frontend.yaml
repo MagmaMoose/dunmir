@@ -1,0 +1,45 @@
+# Frontend: static React SPA (nginx). The API base URL is injected at container
+# start from API_BASE (see frontend/docker-entrypoint.sh) — point it at the
+# externally reachable backend URL (e.g. your ingress host).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minder-frontend
+  namespace: minder
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: minder-frontend
+  template:
+    metadata:
+      labels:
+        app: minder-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: mikrotik-minder-frontend:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: API_BASE
+              value: "http://localhost:8000" # CHANGE to the public backend URL
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minder-frontend
+  namespace: minder
+spec:
+  selector:
+    app: minder-frontend
+  ports:
+    - port: 80
+      targetPort: 8080
