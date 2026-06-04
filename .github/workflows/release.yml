@@ -33,7 +33,7 @@ jobs:
       contents: read # Release writes use the public-app installation token.
       id-token: write
     steps:
-      - uses: magmamoose/release-runner@87130294ede7ce5b9910cc8b63a32a1281af2b83 # v1.22.0
+      - uses: magmamoose/release-runner@84cfbc0c0bf08443f6dc5ff40b937607eb70132f # v1.29.1
         with:
           environment: prod
           environments: '["prod"]'
