@@ -14,7 +14,7 @@
     "db:create": "wrangler d1 create minder"
   },
   "dependencies": {
-    "hono": "^4.12.23"
+    "hono": "^4.12.24"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260605.1",
